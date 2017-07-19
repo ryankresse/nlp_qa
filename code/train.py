@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import os
 import json
-
+import pdb
 import tensorflow as tf
 
 from qa_model import Encoder, QASystem, Decoder
@@ -38,6 +38,7 @@ FLAGS = tf.app.flags.FLAGS
 def initialize_model(session, model, train_dir):
     ckpt = tf.train.get_checkpoint_state(train_dir)
     v2_path = ckpt.model_checkpoint_path + ".index" if ckpt else ""
+    #restore the model from checkpoint if it is already exits. Else initialize the variables and return the model
     if ckpt and (tf.gfile.Exists(ckpt.model_checkpoint_path) or tf.gfile.Exists(v2_path)):
         logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
         model.saver.restore(session, ckpt.model_checkpoint_path)
@@ -81,8 +82,12 @@ def main(_):
     # Do what you need to load datasets from FLAGS.data_dir
     dataset = None
 
+
+
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
+    #vocab is map from words to indices, rev_vocab is our list of words in reverse frequency order
+
     vocab, rev_vocab = initialize_vocab(vocab_path)
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
@@ -102,6 +107,7 @@ def main(_):
     with tf.Session() as sess:
         load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, load_train_dir)
+        pdb.set_trace()
 
         save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
         qa.train(sess, dataset, save_train_dir)

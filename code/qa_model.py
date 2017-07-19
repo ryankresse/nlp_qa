@@ -25,6 +25,7 @@ def get_optimizer(opt):
     return optfn
 
 
+#this is where you should take your input and transform it into your symbolic representation
 class Encoder(object):
     def __init__(self, size, vocab_dim):
         self.size = size
@@ -48,7 +49,7 @@ class Encoder(object):
 
         return
 
-
+#this takes your symbolic representation and produces our ouput probabilities.
 class Decoder(object):
     def __init__(self, output_size):
         self.output_size = output_size
@@ -98,7 +99,8 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        raise NotImplementedError("Connect all parts of your system here!")
+        pass
+        #raise NotImplementedError("Connect all parts of your system here!")
 
 
     def setup_loss(self):

@@ -40,7 +40,9 @@ def setup_args():
 
 def basic_tokenizer(sentence):
     words = []
+    #strip extra whitespace and split on spaceds
     for space_separated_fragment in sentence.strip().split():
+        #split again on space?
         words.extend(re.split(" ", space_separated_fragment))
     return [w for w in words if w]
 
@@ -49,9 +51,12 @@ def initialize_vocabulary(vocabulary_path):
     # map vocab to word embeddings
     if gfile.Exists(vocabulary_path):
         rev_vocab = []
+        #read all the lines of our vocab into a list
         with gfile.GFile(vocabulary_path, mode="r") as f:
             rev_vocab.extend(f.readlines())
+        #remove new line char
         rev_vocab = [line.strip('\n') for line in rev_vocab]
+        #create a dict where word is key and index is value
         vocab = dict([(x, y) for (y, x) in enumerate(rev_vocab)])
         return vocab, rev_vocab
     else:
@@ -71,14 +76,22 @@ def process_glove(args, vocab_list, save_path, size=4e5, random_init=True):
             glove = np.zeros((len(vocab_list), args.glove_dim))
         found = 0
         with open(glove_path, 'r') as fh:
+            #for each line in the glove file
             for line in tqdm(fh, total=size):
+                #split the line
                 array = line.lstrip().rstrip().split(" ")
+                #take the first element -- it must be the key and the rest must be the actual word embedding elements
                 word = array[0]
+                #turn the rest of the elements into floats
                 vector = list(map(float, array[1:]))
+                #if the word is present in our vocab list
                 if word in vocab_list:
+                    #find its index in our list
                     idx = vocab_list.index(word)
+                    # set the corresponding index in our array to that word embedding
                     glove[idx, :] = vector
                     found += 1
+                # it looks like we handle capitalized and upper cased words as separate word vectors?
                 if word.capitalize() in vocab_list:
                     idx = vocab_list.index(word.capitalize())
                     glove[idx, :] = vector
@@ -87,7 +100,7 @@ def process_glove(args, vocab_list, save_path, size=4e5, random_init=True):
                     idx = vocab_list.index(word.upper())
                     glove[idx, :] = vector
                     found += 1
-
+        #save the file
         print("{}/{} of word vocab have corresponding vectors in {}".format(found, len(vocab_list), glove_path))
         np.savez_compressed(save_path, glove=glove)
         print("saved trimmed glove matrix at: {}".format(save_path))
@@ -98,20 +111,26 @@ def create_vocabulary(vocabulary_path, data_paths, tokenizer=None):
         print("Creating vocabulary %s from data %s" % (vocabulary_path, str(data_paths)))
         vocab = {}
         for path in data_paths:
+            #open the file
             with open(path, mode="rb") as f:
                 counter = 0
                 for line in f:
+                    #for logging to the user
                     counter += 1
                     if counter % 100000 == 0:
                         print("processing line %d" % counter)
+                    #tokenize the line
                     tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
+                    #if w is already in our vocab, add one to the entry count, else initialize it in the entry
                     for w in tokens:
                         if w in vocab:
                             vocab[w] += 1
                         else:
                             vocab[w] = 1
+        # sort by num or occurences, with most frequent first
         vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
         print("Vocabulary size: %d" % len(vocab_list))
+        #write it
         with gfile.GFile(vocabulary_path, mode="wb") as vocab_file:
             for w in vocab_list:
                 vocab_file.write(w + b"\n")
@@ -122,6 +141,8 @@ def sentence_to_token_ids(sentence, vocabulary, tokenizer=None):
         words = tokenizer(sentence)
     else:
         words = basic_tokenizer(sentence)
+    # words is a list of the words in the sentence
+    #get the corresponding entry in our vocab map for each word.
     return [vocabulary.get(w, UNK_ID) for w in words]
 
 
@@ -129,15 +150,20 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
                       tokenizer=None):
     if not gfile.Exists(target_path):
         print("Tokenizing data in %s" % data_path)
+        # vocab is a map from word to index
         vocab, _ = initialize_vocabulary(vocabulary_path)
+        #data path is the raw text content -- your wikipedia entries, questions or answers
         with gfile.GFile(data_path, mode="rb") as data_file:
             with gfile.GFile(target_path, mode="w") as tokens_file:
                 counter = 0
+                # for every line in our raw data file
                 for line in data_file:
                     counter += 1
                     if counter % 5000 == 0:
                         print("tokenizing line %d" % counter)
+                    #token_ids is a list of the entry in our vocabulary for each word in the sentence
                     token_ids = sentence_to_token_ids(line, vocab, tokenizer)
+                    #then we write it to file.
                     tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
 
@@ -154,6 +180,7 @@ if __name__ == '__main__':
                        pjoin(args.source_dir, "train.question"),
                        pjoin(args.source_dir, "val.context"),
                        pjoin(args.source_dir, "val.question")])
+    #vocab is a map from words to indices. rev_vocab is a list of the words sorted in reverse frequency of occurence
     vocab, rev_vocab = initialize_vocabulary(pjoin(args.vocab_dir, "vocab.dat"))
 
     # ======== Trim Distributed Word Representation =======
