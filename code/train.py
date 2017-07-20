@@ -6,9 +6,11 @@ import os
 import json
 import pdb
 import tensorflow as tf
-
+import sys
+import numpy as np
 from qa_model import Encoder, QASystem, Decoder
 from os.path import join as pjoin
+import data_utils
 
 import logging
 
@@ -31,6 +33,10 @@ tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per pri
 tf.app.flags.DEFINE_integer("keep", 0, "How many checkpoints to keep, 0 indicates keep all.")
 tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab file (default: ./data/squad/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
+tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to be the same length")
+tf.app.flags.DEFINE_integer("context_length", 200, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("quest_length", 35, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
+
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -82,13 +88,25 @@ def main(_):
     # Do what you need to load datasets from FLAGS.data_dir
     dataset = None
 
+    # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
+    prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else "samp."
 
+    print('Reading data')
+    print('==================')
+    context_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.context'), FLAGS.context_length, FLAGS.pad_token)
+    question_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.question'), FLAGS.quest_length, FLAGS.pad_token)
+    answer_data = np.array(data_utils.read_datafile(pjoin(FLAGS.data_dir, prepend+'train.span')), dtype=np.int32)
+    dataset = (question_data, context_data, answer_data)
+    print('Finished reading data')
+
+    pdb.set_trace()
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
     #vocab is map from words to indices, rev_vocab is our list of words in reverse frequency order
 
     vocab, rev_vocab = initialize_vocab(vocab_path)
+
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
