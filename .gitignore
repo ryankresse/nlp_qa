@@ -2,3 +2,10 @@ data/
 README.md
 download/
 code/docker
+*.pyc
+*.txt
+.ipynb*
+__*
+log/
+read_me.md
+

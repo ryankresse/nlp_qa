@@ -355,7 +355,7 @@ class QASystem(object):
 
     def get_logits(self, raw_output):
         #(max_time, state_size*4)
-        with tf.variable_scope('logits') as scope:
+        with tf.variable_scope('logits', reuse=True) as scope:
             logits = []
             for t in np.arange(self.FLAGS.cont_length):
                 time_step = tf.squeeze(tf.slice(raw_output, [0,t,0], [-1,1,-1])) #(batch,embed)
