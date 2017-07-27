@@ -2,9 +2,11 @@
 from __future__ import print_function
 from collections import Counter
 import string
+import numpy as np
 import re
 import argparse
 import json
+import pdb
 import sys
 
 
@@ -29,6 +31,7 @@ def normalize_answer(s):
 def f1_score(prediction, ground_truth):
     prediction_tokens = normalize_answer(prediction).split()
     ground_truth_tokens = normalize_answer(ground_truth).split()
+    #pdb.set_trace()
     common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
     num_same = sum(common.values())
     if num_same == 0:
@@ -39,9 +42,22 @@ def f1_score(prediction, ground_truth):
     return f1
 
 
+def get_f1_score(preds, ground_truths):
+    f1 = 0; total = 0;
+
+    for p, t in zip(preds, ground_truths):
+        f1 += f1_score(p, t)
+        total +=1
+    #pdb.set_trace()
+    return 100.0 * f1 / total
+
 def exact_match_score(prediction, ground_truth):
     return (normalize_answer(prediction) == normalize_answer(ground_truth))
 
+
+def sigmoid(x):
+    s =  1 / (1+ np.expm1(-1*x))
+    return s
 
 def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
     scores_for_ground_truths = []

@@ -24,10 +24,14 @@ if __name__ == '__main__':
     VAL_NUM =  300
     data_path = os.path.join(os.getcwd(), 'data', 'squad')
 
-    readWriteLines(os.path.join(data_path, 'train.ids.context'), os.path.join(data_path, 'samp.train.ids.context'), TRAIN_NUM)
-    readWriteLines(os.path.join(data_path, 'train.ids.question'), os.path.join(data_path, 'samp.train.ids.question'), TRAIN_NUM)
-    readWriteLines(os.path.join(data_path, 'train.span'), os.path.join(data_path, 'samp.train.span'), TRAIN_NUM)
+    #readWriteLines(os.path.join(data_path, 'train.ids.context'), os.path.join(data_path, 'samp.train.ids.context'), TRAIN_NUM)
+    #readWriteLines(os.path.join(data_path, 'train.ids.question'), os.path.join(data_path, 'samp.train.ids.question'), TRAIN_NUM)
+    #readWriteLines(os.path.join(data_path, 'train.span'), os.path.join(data_path, 'samp.train.span'), TRAIN_NUM)
+    #readWriteLines(os.path.join(data_path, 'train.context'), os.path.join(data_path, 'samp.train.context'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'train.answer'), os.path.join(data_path, 'samp.train.answer'), TRAIN_NUM)
 
-    readWriteLines(os.path.join(data_path, 'val.ids.context'), os.path.join(data_path, 'samp.val.ids.context'), VAL_NUM)
-    readWriteLines(os.path.join(data_path, 'val.ids.question'), os.path.join(data_path, 'samp.val.ids.question'), VAL_NUM)
-    readWriteLines(os.path.join(data_path, 'val.span'), os.path.join(data_path, 'samp.vals.span'), VAL_NUM)
+    #readWriteLines(os.path.join(data_path, 'val.ids.context'), os.path.join(data_path, 'samp.val.ids.context'), VAL_NUM)
+    #readWriteLines(os.path.join(data_path, 'val.ids.question'), os.path.join(data_path, 'samp.val.ids.question'), VAL_NUM)
+    #readWriteLines(os.path.join(data_path, 'val.span'), os.path.join(data_path, 'samp.vals.span'), VAL_NUM)
+    #readWriteLines(os.path.join(data_path, 'val.context'), os.path.join(data_path, 'samp.val.context'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'val.answer'), os.path.join(data_path, 'samp.val.answer'), TRAIN_NUM)

@@ -34,8 +34,9 @@ tf.app.flags.DEFINE_integer("keep", 0, "How many checkpoints to keep, 0 indicate
 tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab file (default: ./data/squad/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to be the same length")
-tf.app.flags.DEFINE_integer("context_length", 200, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("cont_length", 200, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("quest_length", 35, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("ans_length", 2, "The length of the answer")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -93,25 +94,34 @@ def main(_):
 
     print('Reading data')
     print('==================')
-    context_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.context'), FLAGS.context_length, FLAGS.pad_token)
+
+
+    context_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.context'), FLAGS.cont_length, FLAGS.pad_token)
     question_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.question'), FLAGS.quest_length, FLAGS.pad_token)
-    answer_data = np.array(data_utils.read_datafile(pjoin(FLAGS.data_dir, prepend+'train.span')), dtype=np.int32)
-    dataset = (question_data, context_data, answer_data)
+    answer_data = np.array(data_utils.read_token_data_file(pjoin(FLAGS.data_dir, prepend+'train.span')), dtype=np.int32)
+    dense_answers = data_utils.make_dense_answers(answer_data, FLAGS.cont_length)
+
+    #for producing F1 and EM scores
+    context_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.context'))
+
+    #for debugging purposes. Remove when model is training properly
+    ans_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.answer'))
+
+
+    dataset = [question_data, context_data, dense_answers, context_text, ans_text]
     print('Finished reading data')
 
-    pdb.set_trace()
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
+
     #vocab is map from words to indices, rev_vocab is our list of words in reverse frequency order
-
     vocab, rev_vocab = initialize_vocab(vocab_path)
-
 
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
 
-    qa = QASystem(encoder, decoder)
+    qa = QASystem(encoder, decoder, FLAGS,embed_path)
 
     if not os.path.exists(FLAGS.log_dir):
         os.makedirs(FLAGS.log_dir)
@@ -125,7 +135,6 @@ def main(_):
     with tf.Session() as sess:
         load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, load_train_dir)
-        pdb.set_trace()
 
         save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
         qa.train(sess, dataset, save_train_dir)
