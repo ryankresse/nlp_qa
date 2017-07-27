@@ -150,7 +150,7 @@ class QASystem(object):
         self.pred = self.add_prediction_op()
         self.loss = self.get_loss(self.pred, self.ans_placeholder)
         #self.train_op, self.gradient_global_norm = self.add_train_op(self.loss)
-        self.train_op = self.add_train_op(self.loss)
+        self.train_op, self.grad_norm = self.add_train_op(self.loss)
 
     def get_loss(self, logits, labels):
         """
@@ -183,9 +183,12 @@ class QASystem(object):
 
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
-        gradients = optimizer.compute_gradients(loss)
-        train_op = optimizer.minimize(loss)
-        return train_op# tf.global_norm(gradients)
+        gradients, var = zip(*optimizer.compute_gradients(loss))
+        pdb.set_trace()
+        gradients, grad_norm = tf.clip_by_global_norm(gradients, self.FLAGS.max_gradient_norm)
+
+        train_op = optimizer.apply_gradients(zip(gradients, var))
+        return train_op, grad_norm  # tf.global_norm(gradients)
 
 
     def optimize(self, session, train_x, train_y):
@@ -373,8 +376,8 @@ class QASystem(object):
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
-        _, loss, logits = sess.run([self.train_op, self.loss, self.pred], feed_dict=feed)
-        return loss, logits#, gradient_global_norm
+        _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
+        return loss, logits, grad_norm#, gradient_global_norm
 
     def get_ans_words(self, logits, truth, cont_text, cont_length):
         probs = sigmoid(logits)
@@ -411,12 +414,12 @@ class QASystem(object):
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
-            loss, logits = self.train_on_batch(sess, quest, cont, ans)
+            loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
             if (i+1) % 1 == 0:
                 pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
-                print('batch {}, loss: {}, f1: {}'.format(i, loss, f1))
+                print('batch {}, loss: {}, f1: {}, grad_norm: {}'.format(i, loss, f1, grad_norm))
                 #prog.update(i + 1, [("train loss", loss)])
 
             #if self.report: self.report.log_train_loss(loss)
