@@ -148,9 +148,8 @@ class QASystem(object):
         :return:
         """
         self.pred = self.add_prediction_op()
-        self.loss = self.get_loss(self.pred, self.ans_placeholder)
-        #self.train_op, self.gradient_global_norm = self.add_train_op(self.loss)
-        self.train_op, self.grad_norm = self.add_train_op(self.loss)
+        #self.loss = self.get_loss(self.pred, self.ans_placeholder)
+        #self.train_op, self.grad_norm = self.add_train_op(self.loss)
 
     def get_loss(self, logits, labels):
         """
@@ -341,9 +340,8 @@ class QASystem(object):
             fw_h = hidden_state[0].h
             bw_h = hidden_state[1].h
 
-            combined_state = tf.contrib.rnn.LSTMStateTuple(tf.concat([fw_c, bw_c], axis=1), tf.concat([fw_h, bw_h], axis=1))
-            return combined_state
-
+            last_hidden_state = tf.contrib.rnn.LSTMStateTuple(tf.concat([fw_c, bw_c], axis=1), tf.concat([fw_h, bw_h], axis=1))
+            return output, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
     def get_cont_rep(self, cont_embed, quest_last_hid):
@@ -360,24 +358,31 @@ class QASystem(object):
             for t in np.arange(self.FLAGS.cont_length):
                 time_step = tf.squeeze(tf.slice(raw_output, [0,t,0], [-1,1,-1])) #(batch,embed)
                 multiplied = time_step * self.weights['logits_weight']
-                summed = tf.reduce_sum(multiplied, axis=1) + self.biases['logits_bias'] # (batch, cont_length)
+                summed = tf.reduce_sum(multiplied, axis=1) + self.biases['logits_bias'] #(batch, cont_length)
                 logits.append(summed)
             logits_concat = tf.stack(logits, axis=1)
             return logits_concat
 
     def add_prediction_op(self):
         quest_embed, cont_embed = self.add_embeddings()
-        quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
+        quest_out, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
         cont_out = self.get_cont_rep(cont_embed, quest_last_hid) #(batch, max_time, embed*4)
-        logits = self.get_logits(cont_out)
-        return logits
+        return cont_out
+        #logits = self.get_logits(cont_out)
+        #return quest_out, quest_hid
+        #quest_out is a tuple of fw_output and bw_output. Each is shaped (batch, max_time, output_size)
+        #Each item in this tuple is a LSTMStateTuple, consisting of the cell state and the hidden state Each is of shape (batch, output_size)
+        #Next, run the bilstm on the context to get the outputs for that one.
+
 
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
-        _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
-        return loss, logits, grad_norm#, gradient_global_norm
+        cont_out = sess.run(self.pred, feed_dict=feed)
+        #_, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
+        return cont_out
+        #return loss, logits, grad_norm#, gradient_global_norm
 
     def get_ans_words(self, logits, truth, cont_text, cont_length):
         probs = sigmoid(logits)
@@ -414,14 +419,16 @@ class QASystem(object):
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
-            loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
+            #loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
+            cont_out = self.train_on_batch(sess, quest, cont, ans)
+            pdb.set_trace()
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
-            if (i+1) % 1 == 0:
+            '''if (i+1) % 1 == 0:
                 pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
                 print('batch {}, loss: {}, f1: {}, grad_norm: {}'.format(i, loss, f1, grad_norm))
                 #prog.update(i + 1, [("train loss", loss)])
-
+            '''
             #if self.report: self.report.log_train_loss(loss)
         print("")
 
