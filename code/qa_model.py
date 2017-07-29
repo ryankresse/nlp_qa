@@ -455,7 +455,6 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
-        blank = tf.Variable(tf.zeros((3,3)), name='blank')
         saver = tf.train.Saver()
         tic = time.time()
         params = tf.trainable_variables()
