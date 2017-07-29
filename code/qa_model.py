@@ -159,16 +159,15 @@ class QASystem(object):
         """
         with vs.variable_scope("loss"):
             losses = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=logits)
-            example_sum_loss = tf.reduce_sum(losses, axis=1)
+            losses_flat = tf.reshape(losses, [-1])
+            cont_flat = tf.reshape(self.cont_placeholder, [-1])
+            mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
+            masked_losses = losses_flat * mask
+            masked_losses = tf.reshape(masked_losses, tf.shape(losses))
+
+            example_sum_loss = tf.reduce_sum(masked_losses, axis=1)
             return tf.reduce_mean(example_sum_loss)
 
-    def setup_loss(self):
-        """
-        Set up your loss computation here
-        :return:
-        """
-        with vs.variable_scope("loss"):
-            pass
 
     def add_embeddings(self):
         """
@@ -184,7 +183,6 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        pdb.set_trace()
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.FLAGS.max_gradient_norm)
 
         train_op = optimizer.apply_gradients(zip(gradients, var))
@@ -225,22 +223,6 @@ class QASystem(object):
 
         return outputs
 
-    def decode(self, session, test_x):
-        """
-        Returns the probability distribution over different positions in the paragraph
-        so that other methods like self.answer() will be able to work properly
-        :return:
-        """
-        input_feed = {}
-
-        # fill in this feed_dictionary like:
-        # input_feed['test_x'] = test_x
-
-        output_feed = []
-
-        outputs = session.run(output_feed, input_feed)
-
-        return outputs
 
     def answer(self, session, test_x):
 
