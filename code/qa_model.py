@@ -109,7 +109,8 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'logits_weight': tf.get_variable('logits_weight',shape=[self.FLAGS.state_size * 4], dtype=tf.float64)
+                'logits_weight': tf.get_variable('logits_weight',shape=[self.FLAGS.state_size * 4], dtype=tf.float64),
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size * 4, self.FLAGS.state_size * 2], dtype=tf.float64)
                 }
 
     def add_biases(self):
@@ -148,8 +149,8 @@ class QASystem(object):
         :return:
         """
         self.pred = self.add_prediction_op()
-        #self.loss = self.get_loss(self.pred, self.ans_placeholder)
-        #self.train_op, self.grad_norm = self.add_train_op(self.loss)
+        self.loss = self.get_loss(self.pred, self.ans_placeholder)
+        self.train_op, self.grad_norm = self.add_train_op(self.loss)
 
     def get_loss(self, logits, labels):
         """
@@ -183,7 +184,6 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        pdb.set_trace()
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.FLAGS.max_gradient_norm)
 
         train_op = optimizer.apply_gradients(zip(gradients, var))
@@ -340,16 +340,25 @@ class QASystem(object):
             fw_h = hidden_state[0].h
             bw_h = hidden_state[1].h
 
-            last_hidden_state = tf.contrib.rnn.LSTMStateTuple(tf.concat([fw_c, bw_c], axis=1), tf.concat([fw_h, bw_h], axis=1))
-            return output, last_hidden_state
+
+            last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(tf.concat([fw_c, bw_c], axis=1), tf.concat([fw_h, bw_h], axis=1))
+            last_hidden_state = tf.concat([fw_h, bw_h], axis=1)
+            return output, last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
     def get_cont_rep(self, cont_embed, quest_last_hid):
         with tf.variable_scope('cont_rep_rnn') as scope:
-            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
-            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
+            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size * 2)
+            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size * 2)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, initial_state_fw=quest_last_hid, initial_state_bw=quest_last_hid)
             return tf.concat([output[0], output[1]], axis=2)
+
+    def final_lstm(self, cont_scaled):
+        with tf.variable_scope('final_lstm') as scope:
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size * 4)
+            output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64)
+            return output
+
 
     def get_logits(self, raw_output):
         #(max_time, state_size*4)
@@ -363,13 +372,42 @@ class QASystem(object):
             logits_concat = tf.stack(logits, axis=1)
             return logits_concat
 
+    def calculate_att_vectors(self, cont_hid, quest_hid):
+        with tf.variable_scope('attention', reuse=True) as scope:
+            all_scores = []
+            for example in np.arange(self.FLAGS.batch_size):
+                scores = []
+                quest_hid_for_example = tf.slice(quest_hid, [example, 0], [1, -1])
+                for time in np.arange(self.FLAGS.cont_length):
+                    hidden_cont = tf.slice(cont_hid, [example, time, 0], [1,1,-1]) #(1, embed*4)
+                    hidden_cont = tf.squeeze(hidden_cont, axis=0)
+                    intermediate =  tf.matmul(hidden_cont, self.weights['attention_weight'])
+                    scores.append(tf.matmul(intermediate, tf.transpose(quest_hid_for_example)))
+                all_scores.append(scores)
+
+            squeezed = tf.squeeze(tf.stack(all_scores))
+            return tf.nn.softmax(squeezed)
+
+    def scale_cont(self, cont, att):
+        scaled = []
+        for example in np.arange(self.FLAGS.batch_size):
+            ex = tf.slice(cont,[example, 0, 0], [1, -1, -1])
+            ex = tf.squeeze(ex)
+            att_vec = tf.slice(att, [example,0], [1, -1])
+            att_mat = tf.tile(att_vec, [self.FLAGS.state_size*4, 1])
+            scaled.append(ex * tf.transpose(att_mat))
+        return tf.stack(scaled)
+
     def add_prediction_op(self):
         quest_embed, cont_embed = self.add_embeddings()
-        quest_out, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
-        cont_out = self.get_cont_rep(cont_embed, quest_last_hid) #(batch, max_time, embed*4)
-        return cont_out
-        #logits = self.get_logits(cont_out)
-        #return quest_out, quest_hid
+        quest_out, quest_last_hid_tuple, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
+        #return quest_out, quest_last_hid_tuple, quest_last_hid
+        cont_out = self.get_cont_rep(cont_embed, quest_last_hid_tuple) #(batch, max_time, embed*4)
+        att_vectors = self.calculate_att_vectors(cont_out, quest_last_hid)
+        scaled_cont = self.scale_cont(cont_out, att_vectors)
+        final_hid = self.final_lstm(scaled_cont)
+        logits = self.get_logits(final_hid)
+        return logits
         #quest_out is a tuple of fw_output and bw_output. Each is shaped (batch, max_time, output_size)
         #Each item in this tuple is a LSTMStateTuple, consisting of the cell state and the hidden state Each is of shape (batch, output_size)
         #Next, run the bilstm on the context to get the outputs for that one.
@@ -379,10 +417,10 @@ class QASystem(object):
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
-        cont_out = sess.run(self.pred, feed_dict=feed)
-        #_, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
-        return cont_out
-        #return loss, logits, grad_norm#, gradient_global_norm
+        logits = sess.run(self.pred, feed_dict=feed)
+        _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
+        #return att
+        return loss, logits, grad_norm
 
     def get_ans_words(self, logits, truth, cont_text, cont_length):
         probs = sigmoid(logits)
@@ -407,8 +445,6 @@ class QASystem(object):
 
 
     def evaluate_performance(self, pred_ans_words, true_ans_words, ans_text):
-        #pdb.set_trace()
-
         f1 =  get_f1_score(pred_ans_words, true_ans_words)
         return f1
 
@@ -419,16 +455,15 @@ class QASystem(object):
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
-            #loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
-            cont_out = self.train_on_batch(sess, quest, cont, ans)
-            pdb.set_trace()
+            loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
+            #pdb.set_trace()
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
-            '''if (i+1) % 1 == 0:
+            if (i+1) % 1 == 0:
                 pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
                 print('batch {}, loss: {}, f1: {}, grad_norm: {}'.format(i, loss, f1, grad_norm))
                 #prog.update(i + 1, [("train loss", loss)])
-            '''
+
             #if self.report: self.report.log_train_loss(loss)
         print("")
 
