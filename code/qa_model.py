@@ -109,8 +109,8 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'logits_weight': tf.get_variable('logits_weight',shape=[self.FLAGS.state_size * 4], dtype=tf.float64),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size * 4, self.FLAGS.state_size * 2], dtype=tf.float64)
+                'logits_weight': tf.get_variable('logits_weight',shape=[self.FLAGS.state_size], dtype=tf.float64),
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size, self.FLAGS.state_size], dtype=tf.float64)
                 }
 
     def add_biases(self):
@@ -164,7 +164,6 @@ class QASystem(object):
             mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
             masked_losses = losses_flat * mask
             masked_losses = tf.reshape(masked_losses, tf.shape(losses))
-
             example_sum_loss = tf.reduce_sum(masked_losses, axis=1)
             return tf.reduce_mean(example_sum_loss)
 
@@ -314,8 +313,8 @@ class QASystem(object):
 
     def get_quest_rep(self, quest_embed):
         with tf.variable_scope('quest_rep_rnn') as scope:
-            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, dtype=tf.float64)
 
             fw_c = hidden_state[0].c
@@ -324,24 +323,23 @@ class QASystem(object):
             bw_h = hidden_state[1].h
 
 
-            last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(tf.concat([fw_c, bw_c], axis=1), tf.concat([fw_h, bw_h], axis=1))
-            last_hidden_state = tf.concat([fw_h, bw_h], axis=1)
+            last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
+            last_hidden_state = fw_h + bw_h
             return output, last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
     def get_cont_rep(self, cont_embed, quest_last_hid):
         with tf.variable_scope('cont_rep_rnn') as scope:
-            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size * 2)
-            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size * 2)
+            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, initial_state_fw=quest_last_hid, initial_state_bw=quest_last_hid)
-            return tf.concat([output[0], output[1]], axis=2)
+            return output[0] + output[1]
 
     def final_lstm(self, cont_scaled):
         with tf.variable_scope('final_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size * 4)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64)
             return output
-
 
     def get_logits(self, raw_output):
         #(max_time, state_size*4)
@@ -356,7 +354,9 @@ class QASystem(object):
             return logits_concat
 
     def calculate_att_vectors(self, cont_hid, quest_hid):
-        with tf.variable_scope('attention', reuse=True) as scope:
+        print('Cont_hid shape'.format(tf.shape(cont_hid)))
+        print('quest_hid_ shape'.format(tf.shape(quest_hid)))
+        with tf.variable_scope('attention') as scope:
             all_scores = []
             for example in np.arange(self.FLAGS.batch_size):
                 scores = []
@@ -377,30 +377,38 @@ class QASystem(object):
             ex = tf.slice(cont,[example, 0, 0], [1, -1, -1])
             ex = tf.squeeze(ex)
             att_vec = tf.slice(att, [example,0], [1, -1])
-            att_mat = tf.tile(att_vec, [self.FLAGS.state_size*4, 1])
+            att_mat = tf.tile(att_vec, [self.FLAGS.state_size, 1])
             scaled.append(ex * tf.transpose(att_mat))
         return tf.stack(scaled)
 
     def add_prediction_op(self):
         quest_embed, cont_embed = self.add_embeddings()
         quest_out, quest_last_hid_tuple, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
-        #return quest_out, quest_last_hid_tuple, quest_last_hid
+        self.quest_last_hid = quest_last_hid
+
         cont_out = self.get_cont_rep(cont_embed, quest_last_hid_tuple) #(batch, max_time, embed*4)
+        self.cont_out = cont_out
+
         att_vectors = self.calculate_att_vectors(cont_out, quest_last_hid)
         scaled_cont = self.scale_cont(cont_out, att_vectors)
         final_hid = self.final_lstm(scaled_cont)
         logits = self.get_logits(final_hid)
         return logits
-        #quest_out is a tuple of fw_output and bw_output. Each is shaped (batch, max_time, output_size)
-        #Each item in this tuple is a LSTMStateTuple, consisting of the cell state and the hidden state Each is of shape (batch, output_size)
-        #Next, run the bilstm on the context to get the outputs for that one.
 
 
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
-        logits = sess.run(self.pred, feed_dict=feed)
+        _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
+        #return att
+        return loss, logits, grad_norm
+
+
+    def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
+        feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
+        #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
+        quest_last_hid, cont_out = sess.run([self.self.quest_last_hid, self.cont_out], feed_dict=feed)
         _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
         #return att
         return loss, logits, grad_norm
@@ -432,19 +440,39 @@ class QASystem(object):
         return f1
 
 
-    def run_epoch(self, sess, train_examples):
-        prog = Progbar(target=1 + int(len(train_examples[0]) / self.FLAGS.batch_size))
-        num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size)
+    def debug_epoch(self, sess, train_examples, num_batches):
+        print('DEBUGGING')
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
+            pdb.set_trace()
+
             loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
             #pdb.set_trace()
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
-            if (i+1) % 1 == 0:
+            if (i+1) % 25 == 0:
                 pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
+                words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
-                print('batch {}, loss: {}, f1: {}, grad_norm: {}'.format(i, loss, f1, grad_norm))
+                print('batch {}, loss: {}, f1: {}, grad_norm: {}, words predicted: {}'.format(i, loss, f1, grad_norm, words_pred))
+
+    def run_epoch(self, sess, train_examples, epoch):
+        prog = Progbar(target=1 + int(len(train_examples[0]) / self.FLAGS.batch_size))
+        num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size) - 1 # minus one so we always get batches of self.FLAGS.batch_size
+        print('Epoch num: {}'.format(epoch))
+        #if (epoch == 1):
+        #    self.debug_epoch(sess, train_examples, num_batches)
+        for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
+            print('Batch {} of {}'.format(i, num_batches))
+            if (i == num_batches): break
+            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
+            loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
+            #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
+            if (i+1) % 25 == 0:
+                pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
+                words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
+                f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
+                print('batch {}, loss: {}, f1: {}, grad_norm: {}, words predicted: {}'.format(i, loss, f1, grad_norm, words_pred))
                 #prog.update(i + 1, [("train loss", loss)])
 
             #if self.report: self.report.log_train_loss(loss)
@@ -453,8 +481,8 @@ class QASystem(object):
     def fit(self, sess, saver, train_data, train_dir):
         best_score = 0.
 
-        for epoch in range(self.FLAGS.epochs):
-            score = self.run_epoch(sess, train_data)
+        for epoch in range(30):
+            score = self.run_epoch(sess, train_data, epoch)
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
             '''
             if score > best_score:

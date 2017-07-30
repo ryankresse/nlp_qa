@@ -34,8 +34,8 @@ tf.app.flags.DEFINE_integer("keep", 0, "How many checkpoints to keep, 0 indicate
 tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab file (default: ./data/squad/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to be the same length")
-tf.app.flags.DEFINE_integer("cont_length", 200, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
-tf.app.flags.DEFINE_integer("quest_length", 35, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("cont_length", 300, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("quest_length", 45, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("ans_length", 2, "The length of the answer")
 
 
@@ -131,7 +131,6 @@ def main(_):
     print(vars(FLAGS))
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
-    pdb.set_trace()
     with tf.Session() as sess:
         load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, load_train_dir)
