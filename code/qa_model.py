@@ -412,7 +412,7 @@ class QASystem(object):
 
     def get_ans_words(self, logits, truth, cont_text, cont_length):
         probs = sigmoid(logits)
-
+        pdb.set_trace()
         probs = np.clip(probs, 0, 1) # our sigmoid function is giving us infs. So we clip.
         pred_ans_bools = probs >  0.5
         ans_text = []
@@ -447,7 +447,7 @@ class QASystem(object):
             loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
             #pdb.set_trace()
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
-            if (i+1) % 25 == 0:
+            if (i+1) % 5 == 0:
                 pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
                 words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
@@ -459,19 +459,21 @@ class QASystem(object):
         print('Epoch num: {}'.format(epoch))
         #if (epoch == 1):
         #    self.debug_epoch(sess, train_examples, num_batches)
+        running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             if (i == num_batches): break
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
             loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
-            if (i+1) % 25 == 0:
+            running_loss +=loss
+            if (i+1) % 3 == 0:
                 pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
                 words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
                 print('batch {}, loss: {}, f1: {}, grad_norm: {}, words predicted: {}'.format(i, loss, f1, grad_norm, words_pred))
                 #prog.update(i + 1, [("train loss", loss)])
-
+        print('average loss for epoch {}: {}'.format(epoch, running_loss / num_batches))
             #if self.report: self.report.log_train_loss(loss)
         print("")
 

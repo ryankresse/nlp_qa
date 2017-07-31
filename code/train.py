@@ -25,9 +25,10 @@ tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train_dir/att_base", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "train_dir/att_base", "Training directory to load model parameters from to resume training (default: {train_dir}).")
-tf.app.flags.DEFINE_string("ckpt_file_name", "att_base", "Checkpoint file name")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "tiny_samp", "Checkpoint file name")
+tf.app.flags.DEFINE_string("sample_data_prepend", "tiny.samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
 
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
@@ -92,7 +93,7 @@ def main(_):
     dataset = None
 
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
-    prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else "samp."
+    prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
 
     print('Reading data')
     print('==================')
