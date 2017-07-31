@@ -92,7 +92,6 @@ class QASystem(object):
 
 
         self.add_placeholders()
-
         # ==== assemble pieces ====
         with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
             #self.setup_embeddings()
@@ -151,6 +150,7 @@ class QASystem(object):
         self.pred = self.add_prediction_op()
         self.loss = self.get_loss(self.pred, self.ans_placeholder)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
+        self.saver = tf.train.Saver()
 
     def get_loss(self, logits, labels):
         """
@@ -412,6 +412,8 @@ class QASystem(object):
 
     def get_ans_words(self, logits, truth, cont_text, cont_length):
         probs = sigmoid(logits)
+
+        probs = np.clip(probs, 0, 1) # our sigmoid function is giving us infs. So we clip.
         pred_ans_bools = probs >  0.5
         ans_text = []
         pred_text = []
@@ -441,7 +443,6 @@ class QASystem(object):
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
-            pdb.set_trace()
 
             loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
             #pdb.set_trace()
@@ -480,7 +481,7 @@ class QASystem(object):
         for epoch in range(30):
             score = self.run_epoch(sess, train_data, epoch)
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
-            saver.save(sess, self.FLAGS.train_dir)
+            saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
             '''
             if score > best_score:
                 best_score = score
@@ -523,7 +524,7 @@ class QASystem(object):
         # you will also want to save your model parameters in train_dir
         # so that you can use your trained model to make predictions, or
         # even continue training
-        saver = tf.train.Saver()
+        saver = self.saver
         tic = time.time()
         params = tf.trainable_variables()
         num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))

@@ -25,8 +25,10 @@ tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/att_base", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/att_base", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "att_base", "Checkpoint file name")
+
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
@@ -121,7 +123,7 @@ def main(_):
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
 
-    qa = QASystem(encoder, decoder, FLAGS,embed_path)
+    qa = QASystem(encoder, decoder, FLAGS, embed_path)
 
     if not os.path.exists(FLAGS.log_dir):
         os.makedirs(FLAGS.log_dir)
@@ -131,12 +133,12 @@ def main(_):
     print(vars(FLAGS))
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
-    with tf.Session() as sess:
-        load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
-        initialize_model(sess, qa, load_train_dir)
 
-        save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
-        qa.train(sess, dataset, save_train_dir)
+    with tf.Session() as sess:
+        #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
+        initialize_model(sess, qa, FLAGS.train_dir)
+        #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
+        qa.train(sess, dataset, FLAGS.train_dir)
 
         qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
 
