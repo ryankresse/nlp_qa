@@ -323,7 +323,7 @@ class QASystem(object):
             bw_h = hidden_state[1].h
 
 
-            last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
+            last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple((fw_c +  bw_c) / 2 , (fw_h + bw_h) / 2)
             last_hidden_state = fw_h + bw_h
             return output, last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
@@ -333,7 +333,7 @@ class QASystem(object):
             bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, initial_state_fw=quest_last_hid, initial_state_bw=quest_last_hid)
-            return output[0] + output[1]
+            return (output[0] + output[1]) / 2
 
     def final_lstm(self, cont_scaled):
         with tf.variable_scope('final_lstm') as scope:
@@ -343,7 +343,7 @@ class QASystem(object):
 
     def get_logits(self, raw_output):
         #(max_time, state_size*4)
-        with tf.variable_scope('logits', reuse=True) as scope:
+        with tf.variable_scope('logits') as scope:
             logits = []
             for t in np.arange(self.FLAGS.cont_length):
                 time_step = tf.squeeze(tf.slice(raw_output, [0,t,0], [-1,1,-1])) #(batch,embed)
@@ -354,8 +354,6 @@ class QASystem(object):
             return logits_concat
 
     def calculate_att_vectors(self, cont_hid, quest_hid):
-        print('Cont_hid shape'.format(tf.shape(cont_hid)))
-        print('quest_hid_ shape'.format(tf.shape(quest_hid)))
         with tf.variable_scope('attention') as scope:
             all_scores = []
             for example in np.arange(self.FLAGS.batch_size):
@@ -396,7 +394,6 @@ class QASystem(object):
         return logits
 
 
-
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
@@ -415,7 +412,6 @@ class QASystem(object):
 
     def get_ans_words(self, logits, truth, cont_text, cont_length):
         probs = sigmoid(logits)
-        #pdb.set_trace()
         pred_ans_bools = probs >  0.5
         ans_text = []
         pred_text = []
@@ -484,6 +480,7 @@ class QASystem(object):
         for epoch in range(30):
             score = self.run_epoch(sess, train_data, epoch)
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
+            saver.save(sess, self.FLAGS.train_dir)
             '''
             if score > best_score:
                 best_score = score
