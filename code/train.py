@@ -25,11 +25,10 @@ tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/simple", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/simple", "Training directory to load model parameters from to resume training (default: {train_dir}).")
-tf.app.flags.DEFINE_string("ckpt_file_name", "simple", "Checkpoint file name")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/beg_end", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/beg_end", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "beg_end", "Checkpoint file name")
 tf.app.flags.DEFINE_string("sample_data_prepend", "tiny.samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
-
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
@@ -55,7 +54,7 @@ def initialize_model(session, model, train_dir):
     else:
         logging.info("Created model with fresh parameters.")
         session.run(tf.global_variables_initializer())
-        logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
+        #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 
 
@@ -102,16 +101,17 @@ def main(_):
     context_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.context'), FLAGS.cont_length, FLAGS.pad_token)
     question_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.question'), FLAGS.quest_length, FLAGS.pad_token)
     answer_data = np.array(data_utils.read_token_data_file(pjoin(FLAGS.data_dir, prepend+'train.span')), dtype=np.int32)
-    dense_answers = data_utils.make_dense_answers(answer_data, FLAGS.cont_length)
+    #dense_answers = data_utils.make_dense_answers(answer_data, FLAGS.cont_length)
 
     #for producing F1 and EM scores
     context_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.context'))
+    quest_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.question'))
 
     #for debugging purposes. Remove when model is training properly
     ans_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.answer'))
 
 
-    dataset = [question_data, context_data, dense_answers, context_text, ans_text]
+    dataset = [question_data, context_data, answer_data, context_text, ans_text, quest_text]
     print('Finished reading data')
 
 

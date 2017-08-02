@@ -108,14 +108,16 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'logits_weight': tf.get_variable('logits_weight',shape=[self.FLAGS.state_size], dtype=tf.float64),
+                'beg_logits_weight': tf.get_variable('beg_logits_weight',shape=[self.FLAGS.state_size], dtype=tf.float64),
+                'end_logits_weight': tf.get_variable('end_logits_weight',shape=[self.FLAGS.state_size], dtype=tf.float64),
                 'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size, self.FLAGS.state_size], dtype=tf.float64)
                 }
 
     def add_biases(self):
         with tf.variable_scope('biases') as scope:
             self.biases = {
-                'logits_bias': tf.get_variable('logits_bias', shape=[self.FLAGS.state_size], dtype=tf.float64)
+                'beg_logits_bias': tf.get_variable('beg_logits_bias', shape=[self.FLAGS.state_size], dtype=tf.float64),
+                'end_logits_bias': tf.get_variable('end_logits_bias', shape=[self.FLAGS.state_size], dtype=tf.float64)
                 }
 
 
@@ -135,7 +137,7 @@ class QASystem(object):
        """
         self.quest_placeholder = tf.placeholder(tf.int64, shape=(None, self.FLAGS.quest_length))
         self.cont_placeholder = tf.placeholder(tf.int64, shape=(None, self.FLAGS.cont_length))
-        self.ans_placeholder = tf.placeholder(tf.float64, shape=(None, self.FLAGS.cont_length))
+        self.ans_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
         self.dropout_placeholder = tf.placeholder(tf.float32, shape=(None))
 
 
@@ -147,25 +149,37 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        self.pred = self.add_prediction_op()
-        self.loss = self.get_loss(self.pred, self.ans_placeholder)
+        beg_logits, end_logits = self.add_prediction_op()
+        self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
+        self.beg_probs = tf.nn.softmax(beg_logits)
+        self.end_probs = tf.nn.softmax(end_logits)
+        self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
         self.saver = tf.train.Saver()
 
-    def get_loss(self, logits, labels):
+
+    def mask_loss(self, losses):
+        losses_flat = tf.reshape(losses, [-1])
+        cont_flat = tf.reshape(self.cont_placeholder, [-1])
+        mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
+        masked_losses = losses_flat * mask
+        masked_losses = tf.reshape(masked_losses, tf.shape(losses))
+
+    def clip_labels(self, labels):
+        return tf.clip_by_value(labels, 0, self.FLAGS.cont_length)
+
+    def get_loss(self, beg_logits, end_logits, beg_labels, end_labels):
         """
         Set up your loss computation here
         :return:
         """
         with vs.variable_scope("loss"):
-            losses = tf.nn.sigmoid_cross_entropy_with_logits(labels=labels, logits=logits)
-            losses_flat = tf.reshape(losses, [-1])
-            cont_flat = tf.reshape(self.cont_placeholder, [-1])
-            mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
-            masked_losses = losses_flat * mask
-            masked_losses = tf.reshape(masked_losses, tf.shape(losses))
-            example_sum_loss = tf.reduce_sum(masked_losses, axis=1)
-            return tf.reduce_mean(example_sum_loss)
+            #beg_logits = self.mask_logits(beg_logits)
+            #end_logits = self.mask_logits(end_logits)
+            beg_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=beg_labels, logits=beg_logits)
+            end_losses = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=end_labels, logits=end_logits)
+            #example_sum_loss = tf.reduce_sum(beg_losses + end_losses, axis=1)
+            return tf.reduce_mean(beg_losses + end_losses)
 
 
     def add_embeddings(self):
@@ -185,7 +199,7 @@ class QASystem(object):
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.FLAGS.max_gradient_norm)
 
         train_op = optimizer.apply_gradients(zip(gradients, var))
-        return train_op, grad_norm  # tf.global_norm(gradients)
+        return train_op, grad_norm
 
 
     def optimize(self, session, train_x, train_y):
@@ -335,23 +349,33 @@ class QASystem(object):
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, sequence_length=self.cont_lens, initial_state_fw=quest_last_hid, initial_state_bw=quest_last_hid)
             return (output[0] + output[1]) / 2
 
-    def final_lstm(self, cont_scaled):
-        with tf.variable_scope('final_lstm') as scope:
+    def beg_lstm(self, cont_scaled):
+        with tf.variable_scope('beg_lstm') as scope:
             cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
             return output
 
-    def get_logits(self, raw_output):
+    def end_lstm(self, cont_scaled):
+        with tf.variable_scope('end_lstm') as scope:
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
+            return output
+
+    def get_logits(self, raw_output, weights, biases, scope_name):
         #(max_time, state_size*4)
-        with tf.variable_scope('logits') as scope:
+        with tf.variable_scope(scope_name) as scope:
             logits = []
             for t in np.arange(self.FLAGS.cont_length):
                 time_step = tf.squeeze(tf.slice(raw_output, [0,t,0], [-1,1,-1])) #(batch,embed)
-                multiplied = time_step * self.weights['logits_weight']
-                summed = tf.reduce_sum(multiplied + self.biases['logits_bias'], axis=1) #(batch, cont_length)
+                multiplied = time_step * weights
+                summed = tf.reduce_sum(multiplied + biases, axis=1) #(batch, cont_length)
                 logits.append(summed)
             logits_concat = tf.stack(logits, axis=1)
             return logits_concat
+
+    #def get_probs(self, raw_output, weights, biases, scope_name):
+        #return tf.nn.softmax(self.get_logits(raw_output, weights, biases, scope_name))
+
 
     def calculate_att_vectors(self, cont_hid, quest_hid):
         with tf.variable_scope('attention') as scope:
@@ -369,7 +393,6 @@ class QASystem(object):
                     scores.append(simple_dot)
                     #scores.append(tf.matmul(intermediate, tf.transpose(quest_hid_for_example)))
                 all_scores.append(scores)
-
             squeezed = tf.squeeze(tf.stack(all_scores))
             return tf.nn.softmax(squeezed)
 
@@ -402,6 +425,12 @@ class QASystem(object):
         cont_lens = tf.reduce_sum(cont_mask ,axis=1)
         return quest_lens, cont_lens
 
+    def get_labels(self, labels):
+        labels = self.clip_labels(labels)
+        beg_labels = tf.slice(labels, [0, 0], [-1,1])
+        end_labels = tf.slice(labels, [0, 1], [-1,1])
+        return tf.squeeze(beg_labels), tf.squeeze(end_labels)
+
     def add_prediction_op(self):
         self.quest_lens, self.cont_lens = self.get_lens()
 
@@ -416,19 +445,29 @@ class QASystem(object):
         self.att_vectors = att_vectors
         scaled_cont = self.scale_cont(cont_out, att_vectors)
         self.scaled_cont = scaled_cont
-        final_hid = self.final_lstm(scaled_cont)
-        self.final_hid = final_hid
-        logits = self.get_logits(final_hid)
-        return logits
+
+        beg_hid = self.beg_lstm(scaled_cont)
+        end_hid = self.end_lstm(scaled_cont)
+        self.beg_hid = beg_hid
+        self.end_hid = end_hid
+        self.beg_logits = self.get_logits(beg_hid, self.weights['beg_logits_weight'], self.biases['beg_logits_bias'], 'beg_probs')
+        self.end_logits = self.get_logits(end_hid, self.weights['end_logits_weight'], self.biases['end_logits_bias'], 'end_probs')
+
+        #self.final_hid = final_hid
+        #self.beg_probs = self.get_beg_probs()
+        #self.end_probs = self.get_end_probs()
+        #logits = self.get_logits(final_hid)
+        return self.beg_logits, self.end_logits
 
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         #_, loss, logits, gradient_global_norm = sess.run([self.train_op, self.loss, self.pred, self.gradient_global_norm], feed_dict=feed)
-        _, loss, logits, grad_norm, scaled_cont, quest_last_hid, att_vectors, att_weight, cont_out = sess.run([self.train_op, self.loss, self.pred, self.grad_norm, self.scaled_cont, self.quest_last_hid, self.att_vectors, self.weights['attention_weight'], self.cont_out], feed_dict=feed)
-        #scaled_cont = sess.run(self.scaled_cont, feed_dict=feed)
-
-        return loss, logits, grad_norm, scaled_cont, quest_last_hid, att_vectors, att_weight, cont_out
+        #_, loss, logits, grad_norm, scaled_cont, quest_last_hid, att_vectors, att_weight, cont_out = sess.run([self.train_op, self.loss, self.pred, self.grad_norm, self.scaled_cont, self.quest_last_hid, self.att_vectors, self.weights['attention_weight'], self.cont_out], feed_dict=feed)
+        _, loss, ans, beg_logits, end_logits, beg_probs, end_probs = sess.run([self.train_op, self.loss, self.ans_placeholder,self.beg_logits, self.end_logits, self.beg_probs, self.end_probs], feed_dict=feed)
+        #beg_labs, end_labs = sess.run([self.beg_labels, self.end_labels], feed_dict=feed)
+        return loss, ans, beg_logits, end_logits, beg_probs, end_probs
+        #return loss, logits, grad_norm, scaled_cont, quest_last_hid, att_vectors, att_weight, cont_out
 
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
@@ -492,16 +531,18 @@ class QASystem(object):
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
             if (i == num_batches): break
-            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
-            loss, logits, grad_norm, scaled_cont, quest_last_hid, att_vectors, att_weight, cont_out = self.train_on_batch(sess, quest, cont, ans)
+            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
+            loss, ans, beg_logits, end_logits, beg_probs, end_probs = self.train_on_batch(sess, quest, cont, ans)
+            pdb.set_trace()
             #print('batch {}, gradient_global_norm: {}'.format(i, gradient_global_norm))
             running_loss +=loss
-            if (i+1) % 1 == 0:
+            print('loss: {}'.format(loss))
+            '''if (i+1) % 1 == 0:
                 pred_ans_words, true_ans_words, avg_true_prob = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
-                words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
+                #words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
                 print('batch {}, loss: {}, f1: {}, grad_norm: {}, words predicted: {}, avg. true prob: {}'.format(i, loss, f1, grad_norm, words_pred, avg_true_prob))
-                #prog.update(i + 1, [("train loss", loss)])
+                #prog.update(i + 1, [("train loss", loss)])'''
         print('average loss for epoch {}: {}'.format(epoch, running_loss / num_batches))
             #if self.report: self.report.log_train_loss(loss)
         print("")
@@ -556,9 +597,9 @@ class QASystem(object):
         # so that you can use your trained model to make predictions, or
         # even continue training
         saver = self.saver
-        tic = time.time()
-        params = tf.trainable_variables()
-        num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
-        toc = time.time()
-        logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+        #tic = time.time()
+        #params = tf.trainable_variables()
+        #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+        #toc = time.time()
+        #logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
         self.fit(session, saver, dataset, train_dir)
