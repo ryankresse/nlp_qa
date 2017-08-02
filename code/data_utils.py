@@ -56,6 +56,10 @@ def read_and_pad(path, length, pad_token):
     data = read_token_data_file(path)
     return np.array(pad_sequences(data, length, pad_token),  dtype=np.int32)
 
+def invert_map(answer_map):
+    return {v: k for k, v in answer_map.iteritems()}
+
+
 def make_dense_answers(ans_span, cont_length):
     ans = np.zeros((ans_span.shape[0], cont_length), dtype=np.float64)
 

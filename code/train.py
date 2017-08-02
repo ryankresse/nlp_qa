@@ -16,7 +16,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.000001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 10, "Batch size to use during training.")
@@ -25,9 +25,9 @@ tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/beg_end", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/beg_end", "Training directory to load model parameters from to resume training (default: {train_dir}).")
-tf.app.flags.DEFINE_string("ckpt_file_name", "beg_end", "Checkpoint file name")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/mlp", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/mlp", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "mlp", "Checkpoint file name")
 tf.app.flags.DEFINE_string("sample_data_prepend", "tiny.samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
@@ -121,10 +121,12 @@ def main(_):
     #vocab is map from words to indices, rev_vocab is our list of words in reverse frequency order
     vocab, rev_vocab = initialize_vocab(vocab_path)
 
+    idx_word = data_utils.invert_map(vocab)
+
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
 
-    qa = QASystem(encoder, decoder, FLAGS, embed_path)
+    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word)
 
     if not os.path.exists(FLAGS.log_dir):
         os.makedirs(FLAGS.log_dir)
