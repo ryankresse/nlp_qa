@@ -113,7 +113,7 @@ class QASystem(object):
                 'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
                 'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
                 'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size, self.FLAGS.state_size], dtype=tf.float64)
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64)
                 }
 
     def add_biases(self):
@@ -161,13 +161,16 @@ class QASystem(object):
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
         self.saver = tf.train.Saver()
         '''
-
         beg_logits, end_logits = self.add_prediction_op()
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
-        #self.beg_probs = tf.nn.softmax(beg_logits)
-        #self.end_probs = tf.nn.softmax(end_logits)
         self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
+
+        self.beg_prob = tf.nn.softmax(self.beg_logits)
+        self.end_prob = tf.nn.softmax(self.end_logits)
+        self.starts = self.get_pred(self.beg_prob)
+        self.ends = self.get_pred(self.end_prob)
+
         self.saver = tf.train.Saver()
 
     def apply_mask(self, items):
@@ -354,7 +357,7 @@ class QASystem(object):
 
 
             last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
-            last_hidden_state = fw_h + bw_h
+            last_hidden_state = tf.concat([fw_h, bw_h], 1)
             return tf.concat(output, 2), last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
@@ -414,9 +417,22 @@ class QASystem(object):
         #return tf.nn.softmax(self.get_logits(raw_output, weights, biases, scope_name))
 
 
-    def calculate_att_vectors(self, cont_hid, quest_hid):
+
+    def calculate_att_vectors(self, quest_last_hid, cont_hid):
         with tf.variable_scope('attention') as scope:
             all_scores = []
+            for example in np.arange(self.FLAGS.batch_size):
+                quest_hid_for_example = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (400,1)
+                ex_cont = tf.slice(cont_hid, [example, 0, 0], [1,-1,-1])
+                ex_cont = tf.squeeze(ex_cont) #(300, 400) (400, 400)
+                #(300,400) # (400, 1)
+                intermediate = tf.matmul(ex_cont, self.weights['attention_weight'])
+                all_scores.append(tf.matmul(intermediated, tf.transpose(quest_hid_for_example)))
+                #want (300,1)
+            return tf.nn.softmax(tf.squeeze(tf.stack(all_scores)))
+
+
+            '''all_scores = []
             #for each item in batch
             for example in np.arange(self.FLAGS.batch_size):
                 scores = []
@@ -430,21 +446,20 @@ class QASystem(object):
                     scores.append(simple_dot)
                     #scores.append(tf.matmul(intermediate, tf.transpose(quest_hid_for_example)))
                 all_scores.append(scores)
-            squeezed = tf.squeeze(tf.stack(all_scores))
-            return tf.nn.softmax(squeezed)
+            squeezed = tf.squeeze(tf.stack(all_scores))'''
+            #return tf.nn.softmax(squeezed)
 
     def scale_cont(self, cont, att):
         scaled = []
         #for example in batch
-        '''
+
         for example in np.arange(self.FLAGS.batch_size):
             ex = tf.slice(cont,[example, 0, 0], [1, -1, -1])
             ex = tf.squeeze(ex)
             att_vec = tf.slice(att, [example,0], [1, -1])
-            att_mat = tf.tile(att_vec, [self.FLAGS.state_size, 1])
-            scaled.append(ex * tf.transpose(att_mat))
-        '''
-        for example in np.arange(self.FLAGS.batch_size):
+            att_mat = tf.tile(att_vec, [self.FLAGS.state_size*2, 1])
+            scaled.append(tf.multiply(ex, tf.transpose(att_mat)))
+        '''for example in np.arange(self.FLAGS.batch_size):
             ex_scaled = []
             ex = tf.slice(cont,[example, 0, 0], [1, -1, -1])
             ex = tf.squeeze(ex) #our example, a matrix of size (state_size, cont_length)
@@ -452,8 +467,8 @@ class QASystem(object):
                 att_weight = tf.slice(att, [example,t], [1, 1]) #(cont_length)
                 t_scaled = att_weight * tf.slice(ex, [t, 0], [1, -1])
                 ex_scaled.append(t_scaled)
-            scaled.append(tf.stack(ex_scaled))
-        return tf.squeeze(tf.stack(scaled))
+            scaled.append(tf.stack(ex_scaled))'''
+        return tf.stack(scaled)
 
     def get_lens(self):
         quest_mask = tf.sign(self.quest_placeholder)
@@ -475,16 +490,18 @@ class QASystem(object):
         quest_out, quest_last_hid_tuple, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
         self.quest_last_hid = quest_last_hid
         self.quest_out = quest_out
-        cont_out = self.get_cont_rep(cont_embed, quest_last_hid_tuple) #(batch, max_time, embed*4)
+        cont_out = self.get_cont_rep(cont_embed, quest_last_hid_tuple)
         self.cont_out = cont_out
+        self.att_vectors = self.calculate_att_vectors(quest_last_hid, cont_out)
+        self.scaled_cont = self.scale_cont(cont_out, self.att_vectors)
 
-        self.out_concat = tf.concat([self.quest_out, self.cont_out], axis=1)
+
+        self.out_concat = tf.concat([self.quest_out, self.scaled_cont], axis=1)
         self.beg_logits = self.apply_mask(self.get_beg_logits(self.out_concat))
         self.end_logits = self.apply_mask(self.get_end_logits(self.out_concat))
-        self.beg_prob = tf.nn.softmax(self.beg_logits)
-        self.end_prob = tf.nn.softmax(self.end_logits)
-        self.starts = self.get_pred(self.beg_prob)
-        self.ends = self.get_pred(self.end_prob)
+
+
+        #return self.scaled_cont
         return self.beg_logits, self.end_logits
 
         '''
@@ -500,7 +517,6 @@ class QASystem(object):
         #self.beg_logits = self.get_logits(beg_hid, self.weights['beg_logits_weight'], self.biases['beg_logits_bias'], 'beg_probs')
         #self.end_logits = self.get_logits(end_hid, self.weights['end_logits_weight'], self.biases['end_logits_bias'], 'end_probs')
         '''
-
 
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
