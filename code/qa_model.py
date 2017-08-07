@@ -111,8 +111,8 @@ class QASystem(object):
             self.weights = {
                 'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
                 'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
-                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
-                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
+                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length*2, self.FLAGS.cont_length], dtype=tf.float64),
+                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length*2, self.FLAGS.cont_length], dtype=tf.float64),
                 'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64)
                 }
 
@@ -495,8 +495,7 @@ class QASystem(object):
         self.att_vectors = self.calculate_att_vectors(quest_last_hid, cont_out)
         self.scaled_cont = self.scale_cont(cont_out, self.att_vectors)
 
-
-        self.out_concat = tf.concat([self.quest_out, self.scaled_cont], axis=1)
+        self.out_concat = tf.concat([self.quest_out, self.scaled_cont, self.cont_out], axis=1)
         self.beg_logits = self.apply_mask(self.get_beg_logits(self.out_concat))
         self.end_logits = self.apply_mask(self.get_end_logits(self.out_concat))
 
