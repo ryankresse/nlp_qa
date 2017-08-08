@@ -3,7 +3,6 @@ README.md
 download/
 code/docker
 *.pyc
-*.txt
 .ipynb*
 __*
 log/

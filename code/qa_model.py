@@ -152,15 +152,6 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        '''
-        beg_logits, end_logits = self.add_prediction_op()
-        self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
-        self.beg_probs = tf.nn.softmax(beg_logits)
-        self.end_probs = tf.nn.softmax(end_logits)
-        self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
-        self.train_op, self.grad_norm = self.add_train_op(self.loss)
-        self.saver = tf.train.Saver()
-        '''
         beg_logits, end_logits = self.add_prediction_op()
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
         self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
@@ -213,7 +204,7 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        self.clip_val = tf.cond(loss > 5000, lambda: tf.constant(1000.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64) )
+        self.clip_val = tf.constant(10.0, dtype=tf.float64) #tf.cond(loss > 1000000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
 
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
 
@@ -389,12 +380,6 @@ class QASystem(object):
                 hidden = tf.matmul(ex, self.weights['beg_mlp_weight1'])
                 out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2'])
                 logits.append(out)
-            '''for t in np.arange(self.FLAGS.cont_length):
-                time_step = tf.squeeze(tf.slice(raw_output, [0,t,0], [-1,1,-1])) #(batch,embed)
-                hidden = tf.matmul(time_step, self.weights['beg_mlp_weight1'])
-                out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2'])
-                logits.append(out)
-            logits_concat = tf.stack(logits, axis=1)'''
             return tf.squeeze(tf.stack(logits))
     def get_end_logits(self, raw_output):
         #(max_time, state_size*4)
@@ -405,18 +390,7 @@ class QASystem(object):
                 hidden = tf.matmul(ex, self.weights['end_mlp_weight1'])
                 out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2'])
                 logits.append(out)
-            '''for t in np.arange(self.FLAGS.cont_length):
-                time_step = tf.squeeze(tf.slice(raw_output, [0,t,0], [-1,1,-1])) #(batch,embed)
-                hidden = tf.matmul(time_step, self.weights['beg_mlp_weight1'])
-                out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2'])
-                logits.append(out)
-            logits_concat = tf.stack(logits, axis=1)'''
             return tf.squeeze(tf.stack(logits))
-
-    #def get_probs(self, raw_output, weights, biases, scope_name):
-        #return tf.nn.softmax(self.get_logits(raw_output, weights, biases, scope_name))
-
-
 
     def calculate_att_vectors(self, quest_last_hid, cont_hid):
         with tf.variable_scope('attention') as scope:
@@ -425,29 +399,11 @@ class QASystem(object):
                 quest_hid_for_example = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (400,1)
                 ex_cont = tf.slice(cont_hid, [example, 0, 0], [1,-1,-1])
                 ex_cont = tf.squeeze(ex_cont) #(300, 400) (400, 400)
-                #(300,400) # (400, 1)
-                intermediate = tf.matmul(ex_cont, self.weights['attention_weight'])
-                all_scores.append(tf.matmul(intermediated, tf.transpose(quest_hid_for_example)))
+
+                #intermediate = tf.matmul(ex_cont, self.weights['attention_weight'])
+                all_scores.append(tf.matmul(ex_cont, tf.transpose(quest_hid_for_example)))
                 #want (300,1)
             return tf.nn.softmax(tf.squeeze(tf.stack(all_scores)))
-
-
-            '''all_scores = []
-            #for each item in batch
-            for example in np.arange(self.FLAGS.batch_size):
-                scores = []
-                quest_hid_for_example = tf.slice(quest_hid, [example, 0], [1, -1])
-                #for each time stemp in the item
-                for time in np.arange(self.FLAGS.cont_length):
-                    hidden_cont = tf.slice(cont_hid, [example, time, 0], [1,1,-1]) #(1, state_size)
-                    hidden_cont = tf.squeeze(hidden_cont, axis=0)
-                    #intermediate =  tf.matmul(hidden_cont, self.weights['attention_weight'])
-                    simple_dot = tf.matmul(hidden_cont, tf.transpose(quest_hid_for_example))
-                    scores.append(simple_dot)
-                    #scores.append(tf.matmul(intermediate, tf.transpose(quest_hid_for_example)))
-                all_scores.append(scores)
-            squeezed = tf.squeeze(tf.stack(all_scores))'''
-            #return tf.nn.softmax(squeezed)
 
     def scale_cont(self, cont, att):
         scaled = []
@@ -459,15 +415,6 @@ class QASystem(object):
             att_vec = tf.slice(att, [example,0], [1, -1])
             att_mat = tf.tile(att_vec, [self.FLAGS.state_size*2, 1])
             scaled.append(tf.multiply(ex, tf.transpose(att_mat)))
-        '''for example in np.arange(self.FLAGS.batch_size):
-            ex_scaled = []
-            ex = tf.slice(cont,[example, 0, 0], [1, -1, -1])
-            ex = tf.squeeze(ex) #our example, a matrix of size (state_size, cont_length)
-            for t in np.arange(self.FLAGS.cont_length):
-                att_weight = tf.slice(att, [example,t], [1, 1]) #(cont_length)
-                t_scaled = att_weight * tf.slice(ex, [t, 0], [1, -1])
-                ex_scaled.append(t_scaled)
-            scaled.append(tf.stack(ex_scaled))'''
         return tf.stack(scaled)
 
     def get_lens(self):
@@ -578,14 +525,14 @@ class QASystem(object):
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
-            print('loss: {}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
+            print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
             if (i+1) % 1 == 0:
                 true_words = self.get_ans_words(ans, cont)
                 pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
                 f1 = self.evaluate_performance(pred_words, true_words, ans_text)
                 running_f1 += f1
                 print('f1: {}'.format(f1))
-        print('average loss for epoch {}: {}'.format(epoch, running_loss / num_batches))
+        print('average loss for epoch {}: {:.2E}'.format(epoch, running_loss / num_batches))
         avg_f1 = running_f1 / num_batches
         print('average f1 for epoch {}: {}'.format(epoch, avg_f1))
         print("")
@@ -594,7 +541,15 @@ class QASystem(object):
 
 
     def fit(self, sess, saver, train_data, train_dir):
-        best_score = 0.
+        with open('best_score.txt', 'r') as the_file:
+            best_score = the_file.readline()
+
+        if best_score == '':
+            print('no previous best score found. setting best score to zero')
+            best_score = 0.
+        else:
+            print('restored previous best score of {}'.format(best_score))
+            best_score = float(best_score)
 
         for epoch in range(self.FLAGS.epochs):
 
@@ -605,8 +560,10 @@ class QASystem(object):
                 if saver:
                     logger.info("New best score! Saving model.")
                     saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
+                    with open('best_score.txt', 'w') as the_file:
+                        the_file.write(str(best_score))
             else:
-                print("f1 didn't improve. not saving model.")
+                print("f1 didn't improve on best score of {}. not saving model.".format(best_score))
             '''
             if self.report:
                 self.report.log_epoch()
