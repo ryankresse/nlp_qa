@@ -111,9 +111,9 @@ class QASystem(object):
             self.weights = {
                 'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
                 'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
-                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length*2, self.FLAGS.cont_length], dtype=tf.float64),
-                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length*2, self.FLAGS.cont_length], dtype=tf.float64),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64)
+                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
+                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64)
                 }
 
     def add_biases(self):
@@ -204,7 +204,7 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        self.clip_val = tf.constant(10.0, dtype=tf.float64) #tf.cond(loss > 1000000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
+        self.clip_val = tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
 
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
 
@@ -377,20 +377,31 @@ class QASystem(object):
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
-                hidden = tf.matmul(ex, self.weights['beg_mlp_weight1'])
+                hidden = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']))
                 out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2'])
                 logits.append(out)
             return tf.squeeze(tf.stack(logits))
+
     def get_end_logits(self, raw_output):
         #(max_time, state_size*4)
         with tf.variable_scope('end_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
-                hidden = tf.matmul(ex, self.weights['end_mlp_weight1'])
+                hidden = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']))
                 out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2'])
                 logits.append(out)
             return tf.squeeze(tf.stack(logits))
+
+
+    def transform_scaled_cont_concat(self, cont_concat):
+        with tf.variable_scope('reshape_scaled_cont_concat') as scope:
+            reshaped = []
+            for example in np.arange(self.FLAGS.batch_size):
+                ex = tf.squeeze(tf.slice(cont_concat, [example, 0, 0], [1, -1,-1]))
+                out = tf.nn.relu(tf.matmul(ex, self.weights['attention_weight'])) # (300, 800) * (800, 400)
+                reshaped.append(out)
+            return tf.squeeze(tf.stack(reshaped))
 
     def calculate_att_vectors(self, quest_last_hid, cont_hid):
         with tf.variable_scope('attention') as scope:
@@ -441,28 +452,14 @@ class QASystem(object):
         self.cont_out = cont_out
         self.att_vectors = self.calculate_att_vectors(quest_last_hid, cont_out)
         self.scaled_cont = self.scale_cont(cont_out, self.att_vectors)
+        self.scaled_cont_concat = tf.concat([self.scaled_cont, self.cont_out], axis=2)
+        self.scaled_cont_concat = self.transform_scaled_cont_concat(self.scaled_cont_concat)
 
-        self.out_concat = tf.concat([self.quest_out, self.scaled_cont, self.cont_out], axis=1)
+        self.out_concat = tf.concat([self.quest_out, self.scaled_cont_concat], axis=1)
         self.beg_logits = self.apply_mask(self.get_beg_logits(self.out_concat))
         self.end_logits = self.apply_mask(self.get_end_logits(self.out_concat))
-
-
-        #return self.scaled_cont
         return self.beg_logits, self.end_logits
 
-        '''
-        #att_vectors = self.calculate_att_vectors(cont_out, quest_last_hid)
-        #self.att_vectors = att_vectors
-        #scaled_cont = self.scale_cont(cont_out, att_vectors)
-        #self.scaled_cont = scaled_cont
-
-        #beg_hid = self.beg_lstm(scaled_cont)
-        #end_hid = self.end_lstm(scaled_cont)
-        #self.beg_hid = beg_hid
-        #self.end_hid = end_hid
-        #self.beg_logits = self.get_logits(beg_hid, self.weights['beg_logits_weight'], self.biases['beg_logits_bias'], 'beg_probs')
-        #self.end_logits = self.get_logits(end_hid, self.weights['end_logits_weight'], self.biases['end_logits_bias'], 'end_probs')
-        '''
 
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
@@ -516,7 +513,7 @@ class QASystem(object):
 
     def run_epoch(self, sess, train_examples, epoch):
         prog = Progbar(target=1 + int(len(train_examples[0]) / self.FLAGS.batch_size))
-        num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size) - 1 # minus one so we always get batches of self.FLAGS.batch_size
+        num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size) # minus one so we always get batches of self.FLAGS.batch_size
         print('Epoch num: {}'.format(epoch))
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
@@ -526,17 +523,19 @@ class QASystem(object):
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
+
             if (i+1) % 1 == 0:
                 true_words = self.get_ans_words(ans, cont)
                 pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
                 f1 = self.evaluate_performance(pred_words, true_words, ans_text)
                 running_f1 += f1
                 print('f1: {}'.format(f1))
+        avg_loss = running_loss / num_batches
         print('average loss for epoch {}: {:.2E}'.format(epoch, running_loss / num_batches))
         avg_f1 = running_f1 / num_batches
         print('average f1 for epoch {}: {}'.format(epoch, avg_f1))
         print("")
-        return avg_f1
+        return avg_f1,avg_loss, grad_norm, clip_value, beg_prob, end_prob
             #if self.report: self.report.log_train_loss(loss)
 
 
@@ -553,10 +552,16 @@ class QASystem(object):
 
         for epoch in range(self.FLAGS.epochs):
 
-            score = self.run_epoch(sess, train_data, epoch)
+            f1, loss,grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, train_data, epoch)
+
+            with open('train_logs.txt', 'a') as f:
+                max_beg_prob = np.mean(np.max(beg_prob, axis=1))
+                max_end_prob = np.mean(np.max(end_prob, axis=1))
+                f.write("{},{},{},{},{},{}\n".format(f1, loss, grad_norm, clip_value, max_beg_prob, max_end_prob))
+
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
-            if score > best_score:
-                best_score = score
+            if f1 > best_score:
+                best_score = f1
                 if saver:
                     logger.info("New best score! Saving model.")
                     saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
