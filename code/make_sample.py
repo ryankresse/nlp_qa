@@ -20,16 +20,16 @@ def readWriteLines(readPath, writePath, numLines):
     writeLines(writePath, toWrite)
 
 if __name__ == '__main__':
-    TRAIN_NUM = 101
+    TRAIN_NUM = 1001
     VAL_NUM =  300
-    PREPEND = 'tiny.'
+    PREPEND = ''
     data_path = os.path.join(os.getcwd(), 'data', 'squad')
 
-    #readWriteLines(os.path.join(data_path, 'train.ids.context'), os.path.join(data_path, PREPEND+'samp.train.ids.context'), TRAIN_NUM)
-    #readWriteLines(os.path.join(data_path, 'train.ids.question'), os.path.join(data_path, PREPEND+'samp.train.ids.question'), TRAIN_NUM)
-    #readWriteLines(os.path.join(data_path, 'train.span'), os.path.join(data_path, PREPEND+'samp.train.span'), TRAIN_NUM)
-    #readWriteLines(os.path.join(data_path, 'train.context'), os.path.join(data_path, PREPEND+'samp.train.context'), TRAIN_NUM)
-    #readWriteLines(os.path.join(data_path, 'train.answer'), os.path.join(data_path, PREPEND+'samp.train.answer'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'train.ids.context'), os.path.join(data_path, PREPEND+'samp.train.ids.context'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'train.ids.question'), os.path.join(data_path, PREPEND+'samp.train.ids.question'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'train.span'), os.path.join(data_path, PREPEND+'samp.train.span'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'train.context'), os.path.join(data_path, PREPEND+'samp.train.context'), TRAIN_NUM)
+    readWriteLines(os.path.join(data_path, 'train.answer'), os.path.join(data_path, PREPEND+'samp.train.answer'), TRAIN_NUM)
     readWriteLines(os.path.join(data_path, 'train.question'), os.path.join(data_path, PREPEND+'samp.train.question'), TRAIN_NUM)
 
     #readWriteLines(os.path.join(data_path, 'val.ids.context'), os.path.join(data_path, 'samp.val.ids.context'), VAL_NUM)

@@ -155,13 +155,20 @@ class QASystem(object):
         beg_logits, end_logits = self.add_prediction_op()
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
         self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
+        tf.summary.scalar('loss', self.loss)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
+        tf.summary.scalar('grad norm', self.grad_norm)
 
         self.beg_prob = tf.nn.softmax(self.beg_logits)
         self.end_prob = tf.nn.softmax(self.end_logits)
-        self.starts = self.get_pred(self.beg_prob)
-        self.ends = self.get_pred(self.end_prob)
+        tf.summary.histogram('beg_prob', self.beg_prob)
+        tf.summary.histogram('end_prob', self.end_prob)
 
+        self.starts = self.get_pred(self.end_prob)
+        self.ends = self.get_pred(self.end_prob)
+        tf.summary.histogram('ans_len', self.ends - self.starts)
+        self.merged = tf.summary.merge_all()
+        self.summary_writer = tf.summary.FileWriter(self.FLAGS.summaries_dir)
         self.saver = tf.train.Saver()
 
     def apply_mask(self, items):
@@ -173,7 +180,7 @@ class QASystem(object):
         return masked_items
 
     def clip_labels(self, labels):
-        return tf.clip_by_value(labels, 0, self.FLAGS.cont_length)
+        return tf.clip_by_value(labels, 0, self.FLAGS.cont_length-1)
 
 
     def get_loss(self, beg_logits, end_logits, beg_labels, end_labels):
@@ -204,7 +211,7 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        self.clip_val = tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
+        self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float64) #tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
 
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
 
@@ -504,11 +511,13 @@ class QASystem(object):
                 f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
                 print('batch {}, loss: {}, f1: {}, grad_norm: {}, words predicted: {}'.format(i, loss, f1, grad_norm, words_pred))
 
+    def write_summaries(self, summaries, epoch, batch, num_batches):
+        self.summary_writer.add_summary(summaries, (epoch * num_batches) + batch)
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends], feed_dict=feed)
-        return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value
+        train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
+        return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
 
 
     def run_epoch(self, sess, train_examples, epoch):
@@ -518,12 +527,13 @@ class QASystem(object):
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i, num_batches))
-            if (i == num_batches): break
+            if (i == num_batches-1): break
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
-            loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value  = self.train_on_batch(sess, quest, cont, ans)
+            loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
-
+            if (i+1) % 10 == 0:
+                self.write_summaries(merged, epoch, i, num_batches)
             if (i+1) % 1 == 0:
                 true_words = self.get_ans_words(ans, cont)
                 pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)

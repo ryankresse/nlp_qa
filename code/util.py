@@ -439,25 +439,13 @@ def get_minibatches(data, minibatch_size, shuffle=True):
         minibatch_indices = indices[minibatch_start:minibatch_start + minibatch_size]
         yield [minibatch(d, minibatch_indices) for d in data]
 
-
-'''
-def minibatch(data, minibatch_idx):
-    return data[minibatch_idx] if type(data) is np.ndarray else [data[i] for i in minibatch_idx]
-'''
-
 def minibatch(data, minibatch_idx):
     #the context text is of shape (num_examples) while the other pieces of data are of shape (num_examples, num_time)
     if len(data.shape) == 1:
         return data[minibatch_idx]
     else:
         return data[minibatch_idx, :]
-        
-'''
-def minibatches(data, batch_size, shuffle=True):
-    data_size = len(data[0])
-    batches = [np.array(col) for col in zip(*data)]
-    return get_minibatches(batches, batch_size, data_size, shuffle)
-'''
+
 
 def minibatches(data, batch_size, shuffle=True):
     return get_minibatches(data, batch_size, shuffle)
