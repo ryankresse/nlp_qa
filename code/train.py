@@ -11,7 +11,7 @@ import numpy as np
 from qa_model import Encoder, QASystem, Decoder
 from os.path import join as pjoin
 import data_utils
-
+import shutil
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -25,11 +25,14 @@ tf.app.flags.DEFINE_integer("epochs", 10000, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
+tf.app.flags.DEFINE_string("prev_best_score_file", "best_score.txt", "File where previous best score for model is stored")
+tf.app.flags.DEFINE_string("train_stats_file", "train_logs.txt", "File to store stats for the model")
+
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/tensor_board", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/tensor_board", "Training directory to load model parameters from to resume training (default: {train_dir}).")
-tf.app.flags.DEFINE_string("ckpt_file_name", "tensor_board", "Checkpoint file name")
-tf.app.flags.DEFINE_string("sample_data_prepend", "samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/validation", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/validation", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "validation", "Checkpoint file name")
+tf.app.flags.DEFINE_string("sample_data_prepend", "tiny.samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
@@ -55,6 +58,10 @@ def initialize_model(session, model, train_dir):
     else:
         logging.info("Created model with fresh parameters.")
         session.run(tf.global_variables_initializer())
+        with open(FLAGS.prev_best_score_file, 'w') as f: #clear any best score from other models
+            f.write('')
+        shutil.rmtree(FLAGS.summaries_dir) # remove summarries from previous model
+        os.makedirs(FLAGS.summaries_dir)
         #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 

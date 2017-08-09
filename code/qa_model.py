@@ -417,10 +417,7 @@ class QASystem(object):
                 quest_hid_for_example = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (400,1)
                 ex_cont = tf.slice(cont_hid, [example, 0, 0], [1,-1,-1])
                 ex_cont = tf.squeeze(ex_cont) #(300, 400) (400, 400)
-
-                #intermediate = tf.matmul(ex_cont, self.weights['attention_weight'])
                 all_scores.append(tf.matmul(ex_cont, tf.transpose(quest_hid_for_example)))
-                #want (300,1)
             return tf.nn.softmax(tf.squeeze(tf.stack(all_scores)))
 
     def scale_cont(self, cont, att):
@@ -514,6 +511,21 @@ class QASystem(object):
     def write_summaries(self, summaries, epoch, batch, num_batches):
         self.summary_writer.add_summary(summaries, (epoch * num_batches) + batch)
 
+    def get_f1(self, ans, cont, starts, ends, ans_text):
+        true_words = self.get_ans_words(ans, cont)
+        pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
+        f1 = self.evaluate_performance(pred_words, true_words, ans_text)
+        print('f1: {}'.format(f1))
+        return f1
+
+    def compute_and_report_epoch_stats(self, epoch, running_loss, running_f1, num_batches):
+        avg_loss = running_loss / num_batches
+        print('average loss for epoch {}: {:.2E}'.format(epoch, running_loss / num_batches))
+        avg_f1 = running_f1 / num_batches
+        print('average f1 for epoch {}: {}'.format(epoch, avg_f1))
+        print("")
+        return avg_loss, avg_f1
+
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
@@ -521,64 +533,65 @@ class QASystem(object):
 
 
     def run_epoch(self, sess, train_examples, epoch):
-        prog = Progbar(target=1 + int(len(train_examples[0]) / self.FLAGS.batch_size))
-        num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size) # minus one so we always get batches of self.FLAGS.batch_size
+        num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size)
         print('Epoch num: {}'.format(epoch))
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
-            print('Batch {} of {}'.format(i, num_batches))
+            print('Batch {} of {}'.format(i+1, num_batches))
             if (i == num_batches-1): break
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
-            if (i+1) % 10 == 0:
+
+            if (i+1) % 1 == 0:
                 self.write_summaries(merged, epoch, i, num_batches)
             if (i+1) % 1 == 0:
-                true_words = self.get_ans_words(ans, cont)
-                pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
-                f1 = self.evaluate_performance(pred_words, true_words, ans_text)
-                running_f1 += f1
-                print('f1: {}'.format(f1))
-        avg_loss = running_loss / num_batches
-        print('average loss for epoch {}: {:.2E}'.format(epoch, running_loss / num_batches))
-        avg_f1 = running_f1 / num_batches
-        print('average f1 for epoch {}: {}'.format(epoch, avg_f1))
-        print("")
-        return avg_f1,avg_loss, grad_norm, clip_value, beg_prob, end_prob
-            #if self.report: self.report.log_train_loss(loss)
+                running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
 
+        avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches)
+        return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob
 
-    def fit(self, sess, saver, train_data, train_dir):
-        with open('best_score.txt', 'r') as the_file:
+    def retrieve_prev_best_score(self):
+        with open(self.FLAGS.prev_best_score_file, 'r') as the_file:
             best_score = the_file.readline()
-
         if best_score == '':
             print('no previous best score found. setting best score to zero')
             best_score = 0.
         else:
             print('restored previous best score of {}'.format(best_score))
             best_score = float(best_score)
+        return best_score
+
+    def write_to_train_logs(self, f1, loss, grad_norm, clip_value, beg_prob, end_prob):
+        with open(self.FLAGS.train_stats_file, 'a') as f:
+            max_beg_prob = np.mean(np.max(beg_prob, axis=1))
+            max_end_prob = np.mean(np.max(end_prob, axis=1))
+            f.write("{},{},{},{},{},{}\n".format(f1, loss, grad_norm, clip_value, max_beg_prob, max_end_prob))
+
+    def maybe_save_model_and_change_best_score(self, f1, best_score, saver, sess):
+        if f1 > best_score:
+            best_score = f1
+            if saver:
+                logger.info("New best score! Saving model.")
+                saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
+                with open('best_score.txt', 'w') as the_file:
+                    the_file.write(str(best_score))
+        else:
+            print("f1 didn't improve on best score of {}. not saving model.".format(best_score))
+
+        return best_score
+
+    def fit(self, sess, saver, train_data, train_dir):
+        best_score = self.retrieve_prev_best_score()
 
         for epoch in range(self.FLAGS.epochs):
-
-            f1, loss,grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, train_data, epoch)
-
-            with open('train_logs.txt', 'a') as f:
-                max_beg_prob = np.mean(np.max(beg_prob, axis=1))
-                max_end_prob = np.mean(np.max(end_prob, axis=1))
-                f.write("{},{},{},{},{},{}\n".format(f1, loss, grad_norm, clip_value, max_beg_prob, max_end_prob))
+            loss, f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, train_data, epoch)
+            self.write_to_train_logs(f1, loss, grad_norm, clip_value, beg_prob, end_prob)
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
-            if f1 > best_score:
-                best_score = f1
-                if saver:
-                    logger.info("New best score! Saving model.")
-                    saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
-                    with open('best_score.txt', 'w') as the_file:
-                        the_file.write(str(best_score))
-            else:
-                print("f1 didn't improve on best score of {}. not saving model.".format(best_score))
+            best_score = self.maybe_save_model_and_change_best_score(f1, best_score, saver, sess)
+
             '''
             if self.report:
                 self.report.log_epoch()
