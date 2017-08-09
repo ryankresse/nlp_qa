@@ -32,7 +32,7 @@ tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default .
 tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/validation", "Training directory to save the model parameters (default: ./train).")
 tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/validation", "Training directory to load model parameters from to resume training (default: {train_dir}).")
 tf.app.flags.DEFINE_string("ckpt_file_name", "validation", "Checkpoint file name")
-tf.app.flags.DEFINE_string("sample_data_prepend", "tiny.samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
+tf.app.flags.DEFINE_string("sample_data_prepend", "samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
 tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
@@ -93,11 +93,19 @@ def get_normalized_train_dir(train_dir):
     os.symlink(os.path.abspath(train_dir), global_train_dir)
     return global_train_dir
 
+def fetch_data_set(prepend, set_name):
+    context_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'{}.ids.context'.format(set_name)), FLAGS.cont_length, FLAGS.pad_token)
+    question_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'{}.ids.question'.format(set_name)), FLAGS.quest_length, FLAGS.pad_token)
+    answer_data = np.array(data_utils.read_token_data_file(pjoin(FLAGS.data_dir, prepend+'{}.span'.format(set_name))), dtype=np.int32)
+
+    #for producing F1 and EM scores
+    context_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'{}.context'.format(set_name)))
+    quest_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'{}.question'.format(set_name)))
+    ans_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'{}.answer'.format(set_name)))
+    print('Finished reading {} set of {} examples'.format(set_name, context_data.shape[0]))
+    return [question_data, context_data, answer_data, context_text, ans_text, quest_text]
 
 def main(_):
-
-    # Do what you need to load datasets from FLAGS.data_dir
-    dataset = None
 
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
     prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
@@ -105,22 +113,11 @@ def main(_):
     print('Reading data')
     print('==================')
 
+    tr_set = fetch_data_set(prepend, 'train')
+    val_set = fetch_data_set(prepend, 'val')
 
-    context_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.context'), FLAGS.cont_length, FLAGS.pad_token)
-    question_data = data_utils.read_clip_and_pad(pjoin(FLAGS.data_dir, prepend+'train.ids.question'), FLAGS.quest_length, FLAGS.pad_token)
-    answer_data = np.array(data_utils.read_token_data_file(pjoin(FLAGS.data_dir, prepend+'train.span')), dtype=np.int32)
-    #dense_answers = data_utils.make_dense_answers(answer_data, FLAGS.cont_length)
-
-    #for producing F1 and EM scores
-    context_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.context'))
-    quest_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.question'))
-
-    #for debugging purposes. Remove when model is training properly
-    ans_text = data_utils.read_text_data_file(pjoin(FLAGS.data_dir, prepend+'train.answer'))
-
-
-    dataset = [question_data, context_data, answer_data, context_text, ans_text, quest_text]
     print('Finished reading data')
+    print('==================')
 
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
@@ -149,7 +146,7 @@ def main(_):
         #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, FLAGS.train_dir)
         #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
-        qa.train(sess, dataset, FLAGS.train_dir)
+        qa.train(sess, tr_set, val_set, FLAGS.train_dir)
 
         qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
 

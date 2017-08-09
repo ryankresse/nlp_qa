@@ -582,11 +582,11 @@ class QASystem(object):
 
         return best_score
 
-    def fit(self, sess, saver, train_data, train_dir):
+    def fit(self, sess, saver, tr_set, val_set, train_dir):
         best_score = self.retrieve_prev_best_score()
 
         for epoch in range(self.FLAGS.epochs):
-            loss, f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, train_data, epoch)
+            loss, f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
             self.write_to_train_logs(f1, loss, grad_norm, clip_value, beg_prob, end_prob)
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
@@ -600,7 +600,7 @@ class QASystem(object):
         return best_score
 
 
-    def train(self, session, dataset, train_dir):
+    def train(self, session, tr_set, val_set, train_dir):
         """
         Implement main training loop
 
@@ -635,4 +635,4 @@ class QASystem(object):
         #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         #toc = time.time()
         #logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
-        self.fit(session, saver, dataset, train_dir)
+        self.fit(session, saver, tr_set, val_set, train_dir)
