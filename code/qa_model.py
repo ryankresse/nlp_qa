@@ -529,7 +529,7 @@ class QASystem(object):
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
-            if (i == num_batches - 1): break # 
+            if (i == num_batches - 1): break #
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
@@ -573,11 +573,11 @@ class QASystem(object):
         print('')
         return best_score
 
-    def write_to_train_logs(self, f1, loss, grad_norm, clip_value, beg_prob, end_prob):
+    def write_to_train_logs(self, f1, loss, grad_norm, clip_value, beg_prob, end_prob, val_loss, val_f1):
         with open(self.FLAGS.train_stats_file, 'a') as f:
             max_beg_prob = np.mean(np.max(beg_prob, axis=1))
             max_end_prob = np.mean(np.max(end_prob, axis=1))
-            f.write("{},{},{},{},{},{}\n".format(f1, loss, grad_norm, clip_value, max_beg_prob, max_end_prob))
+            f.write("{},{},{},{},{},{},{},{}\n".format(f1, loss, grad_norm, clip_value, max_beg_prob, max_end_prob,val_loss, val_f1))
 
     def maybe_save_model_and_change_best_score(self, f1, best_score, saver, sess):
         if f1 > best_score:
@@ -600,7 +600,6 @@ class QASystem(object):
         val_f1_summ = tf.summary.scalar('val_f1', val_f1_tensor)
         val_merged = tf.summary.merge([val_loss_summ, val_f1_summ])
         merged_for_write = sess.run(val_merged)
-
         self.summary_writer.add_summary(merged_for_write, epoch)
 
 
@@ -611,8 +610,9 @@ class QASystem(object):
         for epoch in range(self.FLAGS.epochs):
             tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
 
-            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, clip_value, beg_prob, end_prob)
+            #self.write_to_train_logs(tr_f1, tr_loss, grad_norm, clip_value, beg_prob, end_prob)
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
+            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, clip_value, beg_prob, end_prob, val_loss, val_f1)
 
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
