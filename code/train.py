@@ -16,7 +16,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.00001, "Learning rate.")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
@@ -115,7 +115,6 @@ def main(_):
 
     tr_set = fetch_data_set(prepend, 'train')
     val_set = fetch_data_set(prepend, 'val')
-
     print('Finished reading data')
     print('==================')
 

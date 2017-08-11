@@ -263,26 +263,6 @@ class QASystem(object):
 
         return (a_s, a_e)
 
-    def validate(self, sess, valid_dataset):
-        """
-        Iterate through the validation dataset and determine what
-        the validation cost is.
-
-        This method calls self.test() which explicitly calculates validation cost.
-
-        How you implement this function is dependent on how you design
-        your data iteration function
-
-        :return:
-        """
-        valid_cost = 0
-
-        for valid_x, valid_y in valid_dataset:
-          valid_cost = self.test(sess, valid_x, valid_y)
-
-
-        return valid_cost
-
     def evaluate_answer(self, session, dataset, sample=100, log=False):
         """
         Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
@@ -515,14 +495,14 @@ class QASystem(object):
         true_words = self.get_ans_words(ans, cont)
         pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
         f1 = self.evaluate_performance(pred_words, true_words, ans_text)
-        print('f1: {}'.format(f1))
+        #print('f1: {}'.format(f1))
         return f1
 
-    def compute_and_report_epoch_stats(self, epoch, running_loss, running_f1, num_batches):
+    def compute_and_report_epoch_stats(self, epoch, running_loss, running_f1, num_batches, report_type='train'):
         avg_loss = running_loss / num_batches
-        print('average loss for epoch {}: {:.2E}'.format(epoch, running_loss / num_batches))
+        print('average {} loss for epoch {}: {:.2E}'.format(report_type, epoch, running_loss / num_batches))
         avg_f1 = running_f1 / num_batches
-        print('average f1 for epoch {}: {}'.format(epoch, avg_f1))
+        print('average {} f1 for epoch {}: {}'.format(report_type, epoch, avg_f1))
         print("")
         return avg_loss, avg_f1
 
@@ -531,26 +511,49 @@ class QASystem(object):
         train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
         return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
 
+    def validate_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
+        feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
+        loss, starts, ends =  sess.run([self.loss, self.starts, self.ends], feed_dict=feed)
+        return loss, starts, ends
 
     def run_epoch(self, sess, train_examples, epoch):
         num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size)
-        print('Epoch num: {}'.format(epoch))
+        print('Training for epoch num: {}'.format(epoch))
+        print('==========')
+        print('')
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
-            if (i == num_batches-1): break
+            if (i == num_batches - 1): break
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
 
-            if (i+1) % 1 == 0:
-                self.write_summaries(merged, epoch, i, num_batches)
-            if (i+1) % 1 == 0:
-                running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
+            self.write_summaries(merged, epoch, i, num_batches)
+            running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
 
         avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches)
         return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob
+
+    def validate(self, sess, val_set, epoch):
+        print('Running Validation for epoch: {}'.format(epoch))
+        print('==========')
+        print('')
+        num_batches = int(len(val_set[0]) / self.FLAGS.batch_size)
+        running_loss = 0; running_f1 = 0;
+        for i, batch in enumerate(minibatches(val_set, self.FLAGS.batch_size)):
+            print('Batch {} of {}'.format(i+1, num_batches))
+            if (i == num_batches-1): break
+            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
+            loss, starts, ends  = self.validate_on_batch(sess, quest, cont, ans)
+            running_loss +=loss
+            running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
+
+        avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches, 'val')
+        #self.write_val_summaries(sess, epoch, avg_loss, avg_f1)
+        return avg_loss, avg_f1
+
 
     def retrieve_prev_best_score(self):
         with open(self.FLAGS.prev_best_score_file, 'r') as the_file:
@@ -561,6 +564,8 @@ class QASystem(object):
         else:
             print('restored previous best score of {}'.format(best_score))
             best_score = float(best_score)
+        print('=========')
+        print('')
         return best_score
 
     def write_to_train_logs(self, f1, loss, grad_norm, clip_value, beg_prob, end_prob):
@@ -579,18 +584,35 @@ class QASystem(object):
                     the_file.write(str(best_score))
         else:
             print("f1 didn't improve on best score of {}. not saving model.".format(best_score))
-
+        print('==========')
+        print('')
         return best_score
+
+    def write_val_summaries(self, sess, epoch, val_loss, val_f1):
+        val_loss_tensor = tf.constant(val_loss)
+        val_f1_tensor = tf.constant(val_f1)
+        val_loss_summ = tf.summary.scalar('val_loss',val_loss_tensor)
+        val_f1_summ = tf.summary.scalar('val_f1', val_f1_tensor)
+        val_merged = tf.summary.merge([val_loss_summ, val_f1_summ])
+        merged_for_write = sess.run(val_merged)
+
+        self.summary_writer.add_summary(merged_for_write, epoch)
+
+
 
     def fit(self, sess, saver, tr_set, val_set, train_dir):
         best_score = self.retrieve_prev_best_score()
 
         for epoch in range(self.FLAGS.epochs):
-            loss, f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
-            self.write_to_train_logs(f1, loss, grad_norm, clip_value, beg_prob, end_prob)
+            tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
+
+            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, clip_value, beg_prob, end_prob)
+            val_loss, val_f1 = self.validate(sess, val_set, epoch)
+
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
-            best_score = self.maybe_save_model_and_change_best_score(f1, best_score, saver, sess)
+            best_score = self.maybe_save_model_and_change_best_score(val_f1, best_score, saver, sess)
+
 
             '''
             if self.report:
