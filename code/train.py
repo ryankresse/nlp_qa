@@ -16,12 +16,16 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-tf.app.flags.DEFINE_float("learning_rate", 0.00001, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
+tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
+tf.app.flags.DEFINE_string("end_prob_file", 'end_prob.npy', "File to end write probabilities")
+
+
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 30, "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("epochs", 10000, "Number of epochs to train.")
+tf.app.flags.DEFINE_integer("epochs", 250, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
@@ -62,6 +66,9 @@ def initialize_model(session, model, train_dir):
             f.write('')
         shutil.rmtree(FLAGS.summaries_dir) # remove summarries from previous model
         os.makedirs(FLAGS.summaries_dir)
+        os.remove(FLAGS.log_dir)
+        os.mknod(FLAGS.log_dir)
+        
         #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 

@@ -209,7 +209,7 @@ class QASystem(object):
         return (quest_embed, cont_embed)
 
     def add_train_op(self, loss):
-        optimizer = tf.train.AdamOptimizer(self.FLAGS.learning_rate)
+        optimizer = tf.train.RMSPropOptimizer(self.FLAGS.learning_rate)
         gradients, var = zip(*optimizer.compute_gradients(loss))
         self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float64) #tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
 
@@ -506,6 +506,11 @@ class QASystem(object):
         print("")
         return avg_loss, avg_f1
 
+
+    def write_prob(self, beg_prob, end_prob):
+        np.save(self.FLAGS.beg_prob_file, beg_prob)
+        np.save(self.FLAGS.end_prob_file, end_prob)
+
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
@@ -524,12 +529,12 @@ class QASystem(object):
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
-            if (i == num_batches - 1): break
+            if (i == num_batches - 1): break # 
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
-
+            self.write_prob(beg_prob, end_prob)
             self.write_summaries(merged, epoch, i, num_batches)
             running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
 
