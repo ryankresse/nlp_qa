@@ -94,7 +94,7 @@ class QASystem(object):
 
         self.add_placeholders()
         # ==== assemble pieces ====
-        with tf.variable_scope("qa", initializer=tf.uniform_unit_scaling_initializer(1.0)):
+        with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
             #self.setup_embeddings()
             #self.set_add_prediction_op()
             self.add_weights()
@@ -109,11 +109,11 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
-                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64),
-                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
-                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64)
+                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer())
                 }
 
     def add_biases(self):
@@ -167,6 +167,7 @@ class QASystem(object):
 
         self.starts = self.get_pred(self.end_prob)
         self.ends = self.get_pred(self.end_prob)
+        self.add_weights_bias_summary()
         tf.summary.histogram('ans_len', self.ends - self.starts)
         self.merged = tf.summary.merge_all()
         self.summary_writer = tf.summary.FileWriter(self.FLAGS.summaries_dir)
@@ -324,7 +325,7 @@ class QASystem(object):
 
 
     def get_quest_rep(self, quest_embed):
-        with tf.variable_scope('quest_rep_rnn') as scope:
+        with tf.variable_scope('quest_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
             bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
@@ -341,7 +342,7 @@ class QASystem(object):
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
     def get_cont_rep(self, cont_embed, quest_hid_state):
-        with tf.variable_scope('cont_rep_rnn') as scope:
+        with tf.variable_scope('cont_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
             bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, initial_state_fw=quest_hid_state, initial_state_bw=quest_hid_state, sequence_length=self.cont_lens)
@@ -476,7 +477,6 @@ class QASystem(object):
         return f1
 
 
-
     def debug_epoch(self, sess, train_examples, num_batches):
         print('DEBUGGING')
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
@@ -492,6 +492,24 @@ class QASystem(object):
 
     def write_summaries(self, summaries, epoch, batch, num_batches):
         self.summary_writer.add_summary(summaries, (epoch * num_batches) + batch)
+
+    def add_weights_bias_summary(self):
+        for k, v in self.weights.items():
+            self.variable_summaries(k,v)
+        for k, v in self.biases.items():
+            self.variable_summaries(k,v)
+
+    def variable_summaries(self, name, var):
+        """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+        with tf.name_scope(name):
+            mean = tf.reduce_mean(var)
+            tf.summary.scalar('mean', mean)
+            with tf.name_scope('stddev'):
+                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+                tf.summary.scalar('stddev', stddev)
+                tf.summary.scalar('max', tf.reduce_max(var))
+                tf.summary.scalar('min', tf.reduce_min(var))
+                tf.summary.histogram('histogram', var)
 
     def get_f1(self, ans, cont, starts, ends, ans_text):
         true_words = self.get_ans_words(ans, cont)
@@ -540,6 +558,8 @@ class QASystem(object):
             self.write_prob(beg_prob, end_prob)
             self.write_summaries(merged, epoch, i, num_batches)
             running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
+            #if epoch > 12:
+                #pdb.set_trace()
 
         avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches)
         return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span
@@ -631,7 +651,8 @@ class QASystem(object):
                 num_since_improve = 0
                 self.save_model(best_score, saver, sess)
             else:
-                self.lr, num_since_improve = self.maybe_change_lr(best_score, num_since_improve)
+                pass
+                #self.lr, num_since_improve = self.maybe_change_lr(best_score, num_since_improve)
 
             '''
             if self.report:

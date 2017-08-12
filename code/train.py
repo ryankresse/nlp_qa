@@ -34,9 +34,9 @@ tf.app.flags.DEFINE_string("prev_best_score_file", "best_score.txt", "File where
 tf.app.flags.DEFINE_string("train_stats_file", "train_logs.txt", "File to store stats for the model")
 
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/validation", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/validation", "Training directory to load model parameters from to resume training (default: {train_dir}).")
-tf.app.flags.DEFINE_string("ckpt_file_name", "validation", "Checkpoint file name")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/tiny_samp/debug_validation", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/tiny_samp/debug_validation", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "debug_validation", "Checkpoint file name")
 tf.app.flags.DEFINE_string("sample_data_prepend", "samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
