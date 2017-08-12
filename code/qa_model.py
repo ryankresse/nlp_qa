@@ -152,6 +152,7 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
+        self.lr = self.FLAGS.learning_rate
         beg_logits, end_logits = self.add_prediction_op()
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
         self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
@@ -209,7 +210,7 @@ class QASystem(object):
         return (quest_embed, cont_embed)
 
     def add_train_op(self, loss):
-        optimizer = tf.train.RMSPropOptimizer(self.FLAGS.learning_rate)
+        optimizer = tf.train.AdamOptimizer(self.lr)
         gradients, var = zip(*optimizer.compute_gradients(loss))
         self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float64) #tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
 
@@ -475,6 +476,7 @@ class QASystem(object):
         return f1
 
 
+
     def debug_epoch(self, sess, train_examples, num_batches):
         print('DEBUGGING')
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
@@ -533,13 +535,14 @@ class QASystem(object):
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
             running_loss +=loss
-            print('loss: {:.2E}, grad_norm: {}, clip_value: {}'.format(loss, grad_norm, clip_value))
+            avg_span = np.mean(np.maximum(0, ends-starts))
+            print('loss: {:.2E}, grad_norm: {}, avg_span: {}'.format(loss, grad_norm, avg_span))
             self.write_prob(beg_prob, end_prob)
             self.write_summaries(merged, epoch, i, num_batches)
             running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
 
         avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches)
-        return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob
+        return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span
 
     def validate(self, sess, val_set, epoch):
         print('Running Validation for epoch: {}'.format(epoch))
@@ -564,8 +567,8 @@ class QASystem(object):
         with open(self.FLAGS.prev_best_score_file, 'r') as the_file:
             best_score = the_file.readline()
         if best_score == '':
-            print('no previous best score found. setting best score to zero')
-            best_score = 0.
+            best_score = np.inf
+            print('no previous best score found. setting best score to {}'.format(best_score))
         else:
             print('restored previous best score of {}'.format(best_score))
             best_score = float(best_score)
@@ -573,25 +576,20 @@ class QASystem(object):
         print('')
         return best_score
 
-    def write_to_train_logs(self, f1, loss, grad_norm, clip_value, beg_prob, end_prob, val_loss, val_f1):
+    def write_to_train_logs(self, f1, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1):
         with open(self.FLAGS.train_stats_file, 'a') as f:
             max_beg_prob = np.mean(np.max(beg_prob, axis=1))
             max_end_prob = np.mean(np.max(end_prob, axis=1))
-            f.write("{},{},{},{},{},{},{},{}\n".format(f1, loss, grad_norm, clip_value, max_beg_prob, max_end_prob,val_loss, val_f1))
+            f.write("{},{},{},{},{},{},{},{}\n".format(f1, loss, grad_norm, avg_span, max_beg_prob, max_end_prob,val_loss, val_f1))
 
-    def maybe_save_model_and_change_best_score(self, f1, best_score, saver, sess):
-        if f1 > best_score:
-            best_score = f1
-            if saver:
-                logger.info("New best score! Saving model.")
-                saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
-                with open('best_score.txt', 'w') as the_file:
-                    the_file.write(str(best_score))
-        else:
-            print("f1 didn't improve on best score of {}. not saving model.".format(best_score))
+    def save_model(self, best_score, saver, sess):
+        if saver:
+            logger.info("New best score! Saving model.")
+            saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
+            with open('best_score.txt', 'w') as the_file:
+                the_file.write(str(best_score))
         print('==========')
         print('')
-        return best_score
 
     def write_val_summaries(self, sess, epoch, val_loss, val_f1):
         val_loss_tensor = tf.constant(val_loss)
@@ -602,22 +600,38 @@ class QASystem(object):
         merged_for_write = sess.run(val_merged)
         self.summary_writer.add_summary(merged_for_write, epoch)
 
+    def maybe_change_lr(self, best_score, num_since_improve):
+        if num_since_improve > self.FLAGS.num_epochs_per_anneal:
+            new_lr = self.lr / 10.0
+            print("model hasn't proved on best score of {} in {} epochs. Annealing lr to {}".format(best_score, self.FLAGS.num_epochs_per_anneal,new_lr ))
+            return new_lr, 0
+        else:
+            print('model hasn"t improved on best score of {} in {} epochs. Current lr is {}'.format(best_score, num_since_improve+1, self.lr))
+            return self.lr, num_since_improve+1
 
 
     def fit(self, sess, saver, tr_set, val_set, train_dir):
         best_score = self.retrieve_prev_best_score()
-
+        num_since_improve = 0
         for epoch in range(self.FLAGS.epochs):
-            tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
-
-            #self.write_to_train_logs(tr_f1, tr_loss, grad_norm, clip_value, beg_prob, end_prob)
+            if epoch == 3:
+                self.lr *= 10
+            tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span = self.run_epoch(sess, tr_set, epoch)
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
-            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, clip_value, beg_prob, end_prob, val_loss, val_f1)
 
+            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1)
+
+            if epoch < 30:
+                continue
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
-            best_score = self.maybe_save_model_and_change_best_score(val_f1, best_score, saver, sess)
 
+            if tr_loss < best_score:
+                best_score = tr_loss
+                num_since_improve = 0
+                self.save_model(best_score, saver, sess)
+            else:
+                self.lr, num_since_improve = self.maybe_change_lr(best_score, num_since_improve)
 
             '''
             if self.report:

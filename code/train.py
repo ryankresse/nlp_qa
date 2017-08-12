@@ -20,6 +20,7 @@ tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
 tf.app.flags.DEFINE_string("end_prob_file", 'end_prob.npy', "File to end write probabilities")
+tf.app.flags.DEFINE_integer("num_epochs_per_anneal", 5, "The learning rate will be annealed if the model doesn't improve in this many epochs.")
 
 
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
@@ -66,9 +67,9 @@ def initialize_model(session, model, train_dir):
             f.write('')
         shutil.rmtree(FLAGS.summaries_dir) # remove summarries from previous model
         os.makedirs(FLAGS.summaries_dir)
-        os.remove(FLAGS.log_dir)
-        os.mknod(FLAGS.log_dir)
-        
+        os.remove(FLAGS.train_stats_file)
+        os.mknod(FLAGS.train_stats_file)
+
         #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 
