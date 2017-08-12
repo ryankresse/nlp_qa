@@ -326,8 +326,8 @@ class QASystem(object):
 
     def get_quest_rep(self, quest_embed):
         with tf.variable_scope('quest_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
-            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
 
             fw_c = hidden_state[0].c
@@ -343,8 +343,8 @@ class QASystem(object):
 
     def get_cont_rep(self, cont_embed, quest_hid_state):
         with tf.variable_scope('cont_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
-            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, initial_state_fw=quest_hid_state, initial_state_bw=quest_hid_state, sequence_length=self.cont_lens)
             return tf.concat(output, 2)
 
@@ -361,14 +361,16 @@ class QASystem(object):
             return output
 
     def get_beg_logits(self, raw_output):
-        #(max_time, state_size*4)
+        #raw_output is (batch, quest+cont_length, embed_size)
         with tf.variable_scope('beg_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
-                hidden = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']))
-                out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2'])
-                logits.append(out)
+                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(345, state_size)
+                #(345, embed_size)*(embed_size,1) = (345, 1)
+                hidden = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1'])
+                #(1, 345)*(345, 300) = (1,300)
+                out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2']) + self.biases['beg_mpl_bias2']
+                logits.append(out) #(1, 300)
             return tf.squeeze(tf.stack(logits))
 
     def get_end_logits(self, raw_output):
@@ -377,8 +379,8 @@ class QASystem(object):
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
-                hidden = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']))
-                out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2'])
+                hidden = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']) + self.biases['end_mpl_bias1'])
+                out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2']) +  self.biases['end_mpl_bias2']
                 logits.append(out)
             return tf.squeeze(tf.stack(logits))
 
@@ -504,12 +506,7 @@ class QASystem(object):
         with tf.name_scope(name):
             mean = tf.reduce_mean(var)
             tf.summary.scalar('mean', mean)
-            with tf.name_scope('stddev'):
-                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-                tf.summary.scalar('stddev', stddev)
-                tf.summary.scalar('max', tf.reduce_max(var))
-                tf.summary.scalar('min', tf.reduce_min(var))
-                tf.summary.histogram('histogram', var)
+            tf.summary.histogram('histogram', var)
 
     def get_f1(self, ans, cont, starts, ends, ans_text):
         true_words = self.get_ans_words(ans, cont)
