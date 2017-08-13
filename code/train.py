@@ -26,7 +26,7 @@ tf.app.flags.DEFINE_integer("num_epochs_per_anneal", 5, "The learning rate will 
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 30, "Batch size to use during training.")
-tf.app.flags.DEFINE_integer("epochs", 250, "Number of epochs to train.")
+tf.app.flags.DEFINE_integer("epochs", 40, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
@@ -113,10 +113,18 @@ def fetch_data_set(prepend, set_name):
     print('Finished reading {} set of {} examples'.format(set_name, context_data.shape[0]))
     return [question_data, context_data, answer_data, context_text, ans_text, quest_text]
 
-def main(_):
+def test_device_placement():
+    print('Running device placement test')
+    print('=======')
+    with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as test_sess:
+        test_mat_mul = tf.matmul(tf.ones([4,4]), tf.zeros([4,4]))
+        print(test_sess.run(test_mat_mul))
 
+def main(_):
+    test_device_placement()
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
     prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
+
 
     print('Reading data')
     print('==================')
@@ -148,6 +156,8 @@ def main(_):
     print(vars(FLAGS))
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
+
+
 
     with tf.Session() as sess:
         #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)

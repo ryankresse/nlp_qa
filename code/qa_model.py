@@ -103,7 +103,7 @@ class QASystem(object):
 
             #self.setup_loss()
         # ==== set up training/updating procedure ====
-        pass
+
 
     def add_weights(self):
         #out is (batch, quest_length, hidden_size*2)
@@ -119,11 +119,11 @@ class QASystem(object):
     def add_biases(self):
         with tf.variable_scope('biases') as scope:
             self.biases = {
-                'beg_logits_bias': tf.get_variable('beg_logits_bias', shape=[self.FLAGS.state_size], dtype=tf.float64),
-                'end_logits_bias': tf.get_variable('end_logits_bias', shape=[self.FLAGS.state_size], dtype=tf.float64)
+                'beg_mpl_bias1': tf.get_variable('beg_mpl_bias1', shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'beg_mpl_bias2': tf.get_variable('beg_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64),
+                'end_mpl_bias1': tf.get_variable('end_mpl_bias1', shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'end_mpl_bias2': tf.get_variable('end_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64)
                 }
-
-
 
     def add_placeholders(self):
         """Generates placeholder variables to represent the input tensors
@@ -350,13 +350,13 @@ class QASystem(object):
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
             return output
 
     def end_lstm(self, cont_scaled):
         with tf.variable_scope('end_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size, activation=tf.nn.relu)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
             return output
 
@@ -474,8 +474,8 @@ class QASystem(object):
     def get_pred(self, probs):
         return tf.argmax(probs, axis=1)
 
-    def evaluate_performance(self, pred_ans_words, true_ans_words, ans_text):
-        f1 =  get_f1_score(pred_ans_words, true_ans_words)
+    def evaluate_performance(self, pred_ans_words, ans_text):
+        f1 =  get_f1_score(pred_ans_words, ans_text.tolist())
         return f1
 
 
@@ -509,9 +509,9 @@ class QASystem(object):
             tf.summary.histogram('histogram', var)
 
     def get_f1(self, ans, cont, starts, ends, ans_text):
-        true_words = self.get_ans_words(ans, cont)
+        #true_words = self.get_ans_words(ans, cont)
         pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
-        f1 = self.evaluate_performance(pred_words, true_words, ans_text)
+        f1 = self.evaluate_performance(pred_words, ans_text)
         #print('f1: {}'.format(f1))
         return f1
 
@@ -546,6 +546,8 @@ class QASystem(object):
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
+            #if (i == 1): break #
+
             if (i == num_batches - 1): break #
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
@@ -637,9 +639,6 @@ class QASystem(object):
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
 
             self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1)
-
-            if epoch < 30:
-                continue
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
 
