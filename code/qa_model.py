@@ -547,7 +547,6 @@ class QASystem(object):
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
             #if (i == 1): break #
-
             if (i == num_batches - 1): break #
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
@@ -571,6 +570,7 @@ class QASystem(object):
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(val_set, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
+            #if i ==1: break
             if (i == num_batches-1): break
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, starts, ends  = self.validate_on_batch(sess, quest, cont, ans)
