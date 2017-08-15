@@ -546,7 +546,7 @@ class QASystem(object):
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
-            #if (i == 1): break #
+            # if (i == 1): break #
             if (i == num_batches - 1): break #
             quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
             loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
@@ -634,7 +634,8 @@ class QASystem(object):
         num_since_improve = 0
         for epoch in range(self.FLAGS.epochs):
             if epoch == 3:
-                self.lr *= 10
+                pass   
+	       #self.lr *= 10
             tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span = self.run_epoch(sess, tr_set, epoch)
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
 
@@ -642,8 +643,8 @@ class QASystem(object):
 
             logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
 
-            if tr_loss < best_score:
-                best_score = tr_loss
+            if val_loss < best_score:
+                best_score = val_loss
                 num_since_improve = 0
                 self.save_model(best_score, saver, sess)
             else:
