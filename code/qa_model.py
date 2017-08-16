@@ -111,17 +111,17 @@ class QASystem(object):
             self.weights = {
                 'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
-                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer())
                 }
 
     def add_biases(self):
         with tf.variable_scope('biases') as scope:
             self.biases = {
-                'beg_mpl_bias1': tf.get_variable('beg_mpl_bias1', shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'beg_mpl_bias1': tf.get_variable('beg_mpl_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
                 'beg_mpl_bias2': tf.get_variable('beg_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64),
-                'end_mpl_bias1': tf.get_variable('end_mpl_bias1', shape=[self.FLAGS.quest_length + self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'end_mpl_bias1': tf.get_variable('end_mpl_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
                 'end_mpl_bias2': tf.get_variable('end_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64)
                 }
 
@@ -153,9 +153,9 @@ class QASystem(object):
         :return:
         """
         self.lr = self.FLAGS.learning_rate
-        beg_logits, end_logits = self.add_prediction_op()
+        self.beg_logits, self.end_logits = self.add_prediction_op()
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
-        self.loss = self.get_loss(beg_logits, end_logits, self.beg_labels, self.end_labels)
+        self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
         tf.summary.scalar('loss', self.loss)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
         tf.summary.scalar('grad norm', self.grad_norm)
@@ -169,6 +169,7 @@ class QASystem(object):
         self.ends = self.get_pred(self.end_prob)
         self.add_weights_bias_summary()
         tf.summary.histogram('ans_len', self.ends - self.starts)
+
         self.merged = tf.summary.merge_all()
         self.summary_writer = tf.summary.FileWriter(self.FLAGS.summaries_dir)
         self.saver = tf.train.Saver()
@@ -350,26 +351,26 @@ class QASystem(object):
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
-            return output
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
+            beg_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
+            return beg_lstm_output
 
     def end_lstm(self, cont_scaled):
         with tf.variable_scope('end_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
-            return output
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
+            end_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
+            return end_lstm_output
 
     def get_beg_logits(self, raw_output):
         #raw_output is (batch, quest+cont_length, embed_size)
         with tf.variable_scope('beg_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(345, state_size)
-                #(345, embed_size)*(embed_size,1) = (345, 1)
-                hidden = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1'])
-                #(1, 345)*(345, 300) = (1,300)
-                out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2']) + self.biases['beg_mpl_bias2']
+                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
+                #(cont_length, state*2)*(state*2, 1) = (300, 1)
+                out = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1'])
+                #(1,300)*(300, 300) = (1,300)
+                #out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2']) + self.biases['beg_mpl_bias2']
                 logits.append(out) #(1, 300)
             return tf.squeeze(tf.stack(logits))
 
@@ -379,8 +380,8 @@ class QASystem(object):
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
-                hidden = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']) + self.biases['end_mpl_bias1'])
-                out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2']) +  self.biases['end_mpl_bias2']
+                out = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']) + self.biases['end_mpl_bias1'])
+                #out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2']) +  self.biases['end_mpl_bias2']
                 logits.append(out)
             return tf.squeeze(tf.stack(logits))
 
@@ -442,10 +443,10 @@ class QASystem(object):
         self.scaled_cont = self.scale_cont(cont_out, self.att_vectors)
         self.scaled_cont_concat = tf.concat([self.scaled_cont, self.cont_out], axis=2)
         self.scaled_cont_concat = self.transform_scaled_cont_concat(self.scaled_cont_concat)
-
-        self.out_concat = tf.concat([self.quest_out, self.scaled_cont_concat], axis=1)
-        self.beg_logits = self.apply_mask(self.get_beg_logits(self.out_concat))
-        self.end_logits = self.apply_mask(self.get_end_logits(self.out_concat))
+        self.beg_lstm_output = self.beg_lstm(self.scaled_cont_concat)
+        self.end_lstm_output = self.end_lstm(self.scaled_cont_concat)
+        self.beg_logits = self.apply_mask(self.get_beg_logits(self.beg_lstm_output))
+        self.end_logits = self.apply_mask(self.get_end_logits(self.beg_lstm_output))
         return self.beg_logits, self.end_logits
 
 
@@ -530,6 +531,7 @@ class QASystem(object):
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
+        #beg_logits, end_logits =  sess.run([self.beg_logits, self.end_logits], feed_dict=feed)
         train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
         return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
 
