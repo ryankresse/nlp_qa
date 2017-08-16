@@ -154,6 +154,7 @@ class QASystem(object):
         """
         self.lr = self.FLAGS.learning_rate
         self.beg_logits, self.end_logits = self.add_prediction_op()
+
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
         self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
         tf.summary.scalar('loss', self.loss)
@@ -327,19 +328,22 @@ class QASystem(object):
 
     def get_quest_rep(self, quest_embed):
         with tf.variable_scope('quest_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
+            bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
+            fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
+            output, output_fw, output_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
 
-            fw_c = hidden_state[0].c
-            bw_c = hidden_state[1].c
-            fw_h = hidden_state[0].h
-            bw_h = hidden_state[1].h
+            last_ix = len(output_bw) - 1
+            bw_c = output_bw[last_ix].c
+            fw_c = output_fw[last_ix].c
+            bw_h = output_bw[last_ix].h
+            fw_h = output_fw[last_ix].h
 
 
             last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
             last_hidden_state = tf.concat([fw_h, bw_h], 1)
-            return tf.concat(output, 2), last_hidden_state_tuple, last_hidden_state
+            #return tf.concat(output, 2), last_hidden_state_tuple, last_hidden_state
+
+            return output, last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
     def get_cont_rep(self, cont_embed, quest_hid_state):
@@ -531,7 +535,7 @@ class QASystem(object):
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        #beg_logits, end_logits =  sess.run([self.beg_logits, self.end_logits], feed_dict=feed)
+        #quest_out, quest_last_hid_tuple, quest_last_hid =  sess.run([self.quest_out, self.quest_last_hid_tuple, self.quest_last_hid ], feed_dict=feed)
         train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
         return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
 
@@ -542,9 +546,6 @@ class QASystem(object):
 
     def run_epoch(self, sess, train_examples, epoch):
         num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size)
-        print('Training for epoch num: {}'.format(epoch))
-        print('==========')
-        print('')
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
             print('Batch {} of {}'.format(i+1, num_batches))
@@ -565,9 +566,6 @@ class QASystem(object):
         return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span
 
     def validate(self, sess, val_set, epoch):
-        print('Running Validation for epoch: {}'.format(epoch))
-        print('==========')
-        print('')
         num_batches = int(len(val_set[0]) / self.FLAGS.batch_size)
         running_loss = 0; running_f1 = 0;
         for i, batch in enumerate(minibatches(val_set, self.FLAGS.batch_size)):
@@ -586,16 +584,19 @@ class QASystem(object):
 
     def retrieve_prev_best_score(self):
         with open(self.FLAGS.prev_best_score_file, 'r') as the_file:
-            best_score = the_file.readline()
-        if best_score == '':
+            score_epoch = the_file.readline()
+        if score_epoch == '':
             best_score = np.inf
+            epoch = 0
             print('no previous best score found. setting best score to {}'.format(best_score))
         else:
+            arr = score_epoch.split(',')
+            best_score = float(arr[0])
+            epoch = int(arr[1])
             print('restored previous best score of {}'.format(best_score))
-            best_score = float(best_score)
         print('=========')
         print('')
-        return best_score
+        return best_score, epoch
 
     def write_to_train_logs(self, f1, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1):
         with open(self.FLAGS.train_stats_file, 'a') as f:
@@ -603,12 +604,12 @@ class QASystem(object):
             max_end_prob = np.mean(np.max(end_prob, axis=1))
             f.write("{},{},{},{},{},{},{},{}\n".format(f1, loss, grad_norm, avg_span, max_beg_prob, max_end_prob,val_loss, val_f1))
 
-    def save_model(self, best_score, saver, sess):
+    def save_model(self, best_score, epoch, saver, sess):
         if saver:
             logger.info("New best score! Saving model.")
             saver.save(sess, self.FLAGS.train_dir+'/' + self.FLAGS.ckpt_file_name)
             with open('best_score.txt', 'w') as the_file:
-                the_file.write(str(best_score))
+                the_file.write(str(best_score) +',{}'.format(epoch))
         print('==========')
         print('')
 
@@ -632,22 +633,34 @@ class QASystem(object):
 
 
     def fit(self, sess, saver, tr_set, val_set, train_dir):
-        best_score = self.retrieve_prev_best_score()
+        best_score, epoch_num = self.retrieve_prev_best_score()
         num_since_improve = 0
-        for epoch in range(self.FLAGS.epochs):
+
+        for epoch in range(epoch_num, epoch_num + self.FLAGS.epochs):
             if epoch == 3:
-                self.lr *= 10
+                pass
+                #self.lr *= 10
+            epoch_num += 1
+
+            logger.info("Training for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
+            print('==========')
+            print('')
             tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span = self.run_epoch(sess, tr_set, epoch)
+
+            logger.info("Validating for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
+            print('==========')
+            print('')
+
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
 
             self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1)
 
-            logger.info("Epoch %d out of %d", epoch + 1, self.FLAGS.epochs)
+            #logger.info("Epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
 
             if tr_loss < best_score:
                 best_score = tr_loss
                 num_since_improve = 0
-                self.save_model(best_score, saver, sess)
+                self.save_model(best_score, epoch_num, saver, sess)
             else:
                 pass
                 #self.lr, num_since_improve = self.maybe_change_lr(best_score, num_since_improve)
@@ -690,9 +703,9 @@ class QASystem(object):
         # so that you can use your trained model to make predictions, or
         # even continue training
         saver = self.saver
-        #tic = time.time()
-        #params = tf.trainable_variables()
-        #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
-        #toc = time.time()
-        #logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+        tic = time.time()
+        params = tf.trainable_variables()
+        num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+        toc = time.time()
+        logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
         self.fit(session, saver, tr_set, val_set, train_dir)
