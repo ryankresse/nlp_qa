@@ -348,10 +348,12 @@ class QASystem(object):
 
     def get_cont_rep(self, cont_embed, quest_hid_state):
         with tf.variable_scope('cont_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            fw_cont_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            output, hidden_state = tf.nn.bidirectional_dynamic_rnn(fw_cont_cell, bw_cont_cell, cont_embed, initial_state_fw=quest_hid_state, initial_state_bw=quest_hid_state, sequence_length=self.cont_lens)
-            return tf.concat(output, 2)
+            bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
+            fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
+            init_states_bw = [quest_hid_state for i in range(3)]
+            init_states_fw = [quest_hid_state for i in range(3)]
+            output, output_fw, output_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, cont_embed, initial_states_fw=init_states_fw,initial_states_bw=init_states_bw, sequence_length=self.cont_lens, dtype=tf.float64)
+	    return output
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
@@ -501,10 +503,13 @@ class QASystem(object):
         self.summary_writer.add_summary(summaries, (epoch * num_batches) + batch)
 
     def add_weights_bias_summary(self):
-        for k, v in self.weights.items():
+        for var in tf.trainable_variables():
+            tf.summary.histogram(var.name, var)
+        '''for k, v in self.weights.items():
             self.variable_summaries(k,v)
         for k, v in self.biases.items():
             self.variable_summaries(k,v)
+        '''
 
     def variable_summaries(self, name, var):
         """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
