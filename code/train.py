@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
-tf.app.flags.DEFINE_string("summaries_dir", 'for_gpu_4', "Folder for summaries")
+tf.app.flags.DEFINE_string("summaries_dir", 'for_gpu_5', "Folder for summaries")
 tf.app.flags.DEFINE_string("end_prob_file", 'end_prob.npy', "File to end write probabilities")
 tf.app.flags.DEFINE_integer("num_epochs_per_anneal", 5, "The learning rate will be annealed if the model doesn't improve in this many epochs.")
 
@@ -34,9 +34,9 @@ tf.app.flags.DEFINE_string("prev_best_score_file", "best_score.txt", "File where
 tf.app.flags.DEFINE_string("train_stats_file", "train_logs.txt", "File to store stats for the model")
 
 tf.app.flags.DEFINE_string("data_dir", "data/squad", "SQuAD directory (default ./data/squad)")
-tf.app.flags.DEFINE_string("train_dir", "train_dir/for_gpu_4", "Training directory to save the model parameters (default: ./train).")
-tf.app.flags.DEFINE_string("load_train_dir", "train_dir/for_gpu_4", "Training directory to load model parameters from to resume training (default: {train_dir}).")
-tf.app.flags.DEFINE_string("ckpt_file_name", "for_gpu_4", "Checkpoint file name")
+tf.app.flags.DEFINE_string("train_dir", "train_dir/for_gpu_5", "Training directory to save the model parameters (default: ./train).")
+tf.app.flags.DEFINE_string("load_train_dir", "train_dir/for_gpu_5", "Training directory to load model parameters from to resume training (default: {train_dir}).")
+tf.app.flags.DEFINE_string("ckpt_file_name", "for_gpu_5", "Checkpoint file name")
 tf.app.flags.DEFINE_string("sample_data_prepend", "samp.", "String prepended to data file to indicate it contains a small sample of the original data set")
 tf.app.flags.DEFINE_string("log_dir", "log", "Path to store log and flag files (default: ./log)")
 tf.app.flags.DEFINE_string("optimizer", "adam", "adam / sgd")
@@ -70,7 +70,7 @@ def initialize_model(session, model, train_dir):
         os.remove(FLAGS.train_stats_file)
         os.mknod(FLAGS.train_stats_file)
 
-        logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
+        #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 
 

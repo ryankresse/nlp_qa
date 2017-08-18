@@ -109,11 +109,12 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*4, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*4, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
                 'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer())
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'att_vec_weight': tf.get_variable('att_vec_weight', shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer())
                 }
 
     def add_biases(self):
@@ -353,41 +354,35 @@ class QASystem(object):
             init_states_bw = [quest_hid_state for i in range(3)]
             init_states_fw = [quest_hid_state for i in range(3)]
             output, output_fw, output_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, cont_embed, initial_states_fw=init_states_fw,initial_states_bw=init_states_bw, sequence_length=self.cont_lens, dtype=tf.float64)
-	    return output
+            return output
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*4)
             beg_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
             return beg_lstm_output
 
     def end_lstm(self, cont_scaled):
         with tf.variable_scope('end_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*4)
             end_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
             return end_lstm_output
 
     def get_beg_logits(self, raw_output):
-        #raw_output is (batch, quest+cont_length, embed_size)
         with tf.variable_scope('beg_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
-                #(cont_length, state*2)*(state*2, 1) = (300, 1)
-                out = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1'])
-                #(1,300)*(300, 300) = (1,300)
-                #out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2']) + self.biases['beg_mpl_bias2']
+                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*4)
+                out = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1']) #(cont_length, state_size*4).dot(state_size*4, 1) + (cont_length)
                 logits.append(out) #(1, 300)
             return tf.squeeze(tf.stack(logits))
 
     def get_end_logits(self, raw_output):
-        #(max_time, state_size*4)
         with tf.variable_scope('end_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
                 out = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']) + self.biases['end_mpl_bias1'])
-                #out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2']) +  self.biases['end_mpl_bias2']
                 logits.append(out)
             return tf.squeeze(tf.stack(logits))
 
@@ -405,11 +400,13 @@ class QASystem(object):
         with tf.variable_scope('attention') as scope:
             all_scores = []
             for example in np.arange(self.FLAGS.batch_size):
-                quest_hid_for_example = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (400,1)
+                quest_hid_for_example = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (1,state*2)
                 ex_cont = tf.slice(cont_hid, [example, 0, 0], [1,-1,-1])
-                ex_cont = tf.squeeze(ex_cont) #(300, 400) (400, 400)
-                all_scores.append(tf.matmul(ex_cont, tf.transpose(quest_hid_for_example)))
-            return tf.nn.softmax(tf.squeeze(tf.stack(all_scores)))
+                ex_cont = tf.squeeze(ex_cont) #(cont_length, state*2)
+                intermed = tf.matmul(self.weights['att_vec_weight'], tf.transpose(quest_hid_for_example)) # (state*2, state*2).dot(state*2, 1) = (state*2, 1)
+                out = tf.matmul(ex_cont, intermed) # (cont_length, state*2).dot(state*2, 1) = (cont_length,1)
+                all_scores.append(out)
+            return tf.nn.softmax(tf.squeeze(tf.stack(all_scores))) #(batch, cont_length)
 
     def scale_cont(self, cont, att):
         scaled = []
@@ -441,16 +438,16 @@ class QASystem(object):
 
         quest_embed, cont_embed = self.add_embeddings()
         quest_out, quest_last_hid_tuple, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
-        self.quest_last_hid = quest_last_hid
+        self.quest_last_hid = quest_last_hid #(batch, state*2)
         self.quest_out = quest_out
         cont_out = self.get_cont_rep(cont_embed, quest_last_hid_tuple)
-        self.cont_out = cont_out
-        self.att_vectors = self.calculate_att_vectors(quest_last_hid, cont_out)
-        self.scaled_cont = self.scale_cont(cont_out, self.att_vectors)
-        self.scaled_cont_concat = tf.concat([self.scaled_cont, self.cont_out], axis=2)
-        self.scaled_cont_concat = self.transform_scaled_cont_concat(self.scaled_cont_concat)
-        self.beg_lstm_output = self.beg_lstm(self.scaled_cont_concat)
-        self.end_lstm_output = self.end_lstm(self.scaled_cont_concat)
+        self.cont_out = cont_out #(batch, cont_length, state*2)
+        self.att_vectors = self.calculate_att_vectors(quest_last_hid, cont_out) #(batch, cont_length)
+        self.scaled_cont = self.scale_cont(cont_out, self.att_vectors) #(batch, cont_length, state*2)
+        self.scaled_cont_concat = tf.concat([self.scaled_cont, self.cont_out], axis=2) #(batch, cont_length, state*4)
+        #self.scaled_cont_concat = self.transform_scaled_cont_concat(self.scaled_cont_concat) #(batch, cont_length, state*2)
+        self.beg_lstm_output = self.beg_lstm(self.scaled_cont_concat) #(batch, cont_length, state*2)
+        self.end_lstm_output = self.end_lstm(self.scaled_cont_concat) #(batch, cont_length, state*2)
         self.beg_logits = self.apply_mask(self.get_beg_logits(self.beg_lstm_output))
         self.end_logits = self.apply_mask(self.get_end_logits(self.beg_lstm_output))
         return self.beg_logits, self.end_logits
