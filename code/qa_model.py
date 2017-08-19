@@ -525,8 +525,11 @@ class QASystem(object):
     def compute_and_report_epoch_stats(self, epoch, running_loss, running_f1, num_batches, report_type='train'):
         avg_loss = running_loss / num_batches
         print('average {} loss for epoch {}: {:.2E}'.format(report_type, epoch, running_loss / num_batches))
-        avg_f1 = running_f1 / num_batches
-        print('average {} f1 for epoch {}: {}'.format(report_type, epoch, avg_f1))
+        if running_f1:
+            avg_f1 = running_f1 / num_batches
+            print('average {} f1 for epoch {}: {}'.format(report_type, epoch, avg_f1))
+        else:
+            avg_f1 = None
         print("")
         return avg_loss, avg_f1
 
@@ -558,14 +561,14 @@ class QASystem(object):
             running_loss +=loss
             avg_span = np.mean(np.maximum(0, ends-starts))
             print('loss: {:.2E}, grad_norm: {}, avg_span: {}'.format(loss, grad_norm, avg_span))
-            self.write_prob(beg_prob, end_prob)
+            #self.write_prob(beg_prob, end_prob)
             self.write_summaries(merged, epoch, i, num_batches)
-            running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
+            #running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
             #if epoch > 12:
                 #pdb.set_trace()
 
-        avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches)
-        return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span
+        avg_loss, _ = self.compute_and_report_epoch_stats(epoch, running_loss, None, num_batches)
+        return avg_loss, grad_norm, clip_value, beg_prob, end_prob, avg_span
 
     def validate(self, sess, val_set, epoch):
         num_batches = int(len(val_set[0]) / self.FLAGS.batch_size)
@@ -600,11 +603,11 @@ class QASystem(object):
         print('')
         return best_score, epoch
 
-    def write_to_train_logs(self, f1, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1):
+    def write_to_train_logs(self, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1, epic_duration):
         with open(self.FLAGS.train_stats_file, 'a') as f:
             max_beg_prob = np.mean(np.max(beg_prob, axis=1))
             max_end_prob = np.mean(np.max(end_prob, axis=1))
-            f.write("{},{},{},{},{},{},{},{}\n".format(f1, loss, grad_norm, avg_span, max_beg_prob, max_end_prob,val_loss, val_f1))
+            f.write("{},{},{},{},{},{},{},{}\n".format(loss, grad_norm, avg_span, max_beg_prob, max_end_prob,val_loss, val_f1, epic_duration))
 
     def save_model(self, best_score, epoch, saver, sess):
         if saver:
@@ -647,15 +650,19 @@ class QASystem(object):
             logger.info("Training for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
             print('==========')
             print('')
-            tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span = self.run_epoch(sess, tr_set, epoch)
+            tic = time.time()
+            tr_loss, grad_norm, clip_value, beg_prob, end_prob, avg_span = self.run_epoch(sess, tr_set, epoch)
 
             logger.info("Validating for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
             print('==========')
             print('')
 
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
+            toc = time.time()
+            duration = (toc - tic) / 60.0
+            logger.info("Epoch took {} minutes".format(duration))
 
-            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1)
+            self.write_to_train_logs(tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1, duration)
 
             #logger.info("Epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
 
@@ -707,7 +714,7 @@ class QASystem(object):
         saver = self.saver
         tic = time.time()
         params = tf.trainable_variables()
-        num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+        #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
-        logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+        #logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
         self.fit(session, saver, tr_set, val_set, train_dir)
