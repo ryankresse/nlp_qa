@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 MODEL_NAME= 'mult_per'
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
-tf.app.flags.DEFINE_string("summaries_dir", MODEL_NAME, "Folder for summaries")
+tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
 tf.app.flags.DEFINE_string("end_prob_file", 'end_prob.npy', "File to end write probabilities")
 tf.app.flags.DEFINE_integer("num_epochs_per_anneal", 5, "The learning rate will be annealed if the model doesn't improve in this many epochs.")
 

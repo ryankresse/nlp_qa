@@ -111,10 +111,10 @@ class QASystem(object):
             self.weights = {
                 'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
-                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                #'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                #'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'full_att_weight': tf.get_variable('full_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                #'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'max_att_weight': tf.get_variable('max_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'mean_att_weight': tf.get_variable('mean_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 }
@@ -123,9 +123,9 @@ class QASystem(object):
         with tf.variable_scope('biases') as scope:
             self.biases = {
                 'beg_mpl_bias1': tf.get_variable('beg_mpl_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                'beg_mpl_bias2': tf.get_variable('beg_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64),
+                #'beg_mpl_bias2': tf.get_variable('beg_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64),
                 'end_mpl_bias1': tf.get_variable('end_mpl_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                'end_mpl_bias2': tf.get_variable('end_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64)
+                #'end_mpl_bias2': tf.get_variable('end_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64)
                 }
 
     def add_placeholders(self):
@@ -655,6 +655,7 @@ class QASystem(object):
 
     def variable_summaries(self, name, var):
         """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+
         with tf.name_scope(name):
             mean = tf.reduce_mean(var)
             tf.summary.scalar('mean', mean)
