@@ -25,11 +25,11 @@ tf.app.flags.DEFINE_integer("num_epochs_per_anneal", 5, "The learning rate will 
 
 tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 30, "Batch size to use during training.")
+tf.app.flags.DEFINE_integer("batch_size", 32, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 40, "Number of epochs to train.")
 tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
-tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained vocabulary.")
+tf.app.flags.DEFINE_integer("embedding_size", 300, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("prev_best_score_file", "best_score.txt", "File where previous best score for model is stored")
 tf.app.flags.DEFINE_string("train_stats_file", "train_logs.txt", "File to store stats for the model")
 
@@ -48,6 +48,7 @@ tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to 
 tf.app.flags.DEFINE_integer("cont_length", 300, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("quest_length", 45, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("ans_length", 2, "The length of the answer")
+tf.app.flags.DEFINE_integer("num_perspectives", 10, "The number of matching perspectives")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -70,7 +71,7 @@ def initialize_model(session, model, train_dir):
         os.remove(FLAGS.train_stats_file)
         os.mknod(FLAGS.train_stats_file)
 
-        logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
+        #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 
 

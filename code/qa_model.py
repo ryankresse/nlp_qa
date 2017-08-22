@@ -113,9 +113,10 @@ class QASystem(object):
                 'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
                 'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'full_att_weight': tf.get_variable('full_att_weight', shape=[1, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'max_att_weight': tf.get_variable('max_att_weight', shape=[1, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer())
+                'full_att_weight': tf.get_variable('full_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'max_att_weight': tf.get_variable('max_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'mean_att_weight': tf.get_variable('mean_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 }
 
     def add_biases(self):
@@ -155,6 +156,7 @@ class QASystem(object):
         :return:
         """
         self.lr = self.FLAGS.learning_rate
+
         self.beg_logits, self.end_logits = self.add_prediction_op()
 
         self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
@@ -170,8 +172,11 @@ class QASystem(object):
 
         self.starts = self.get_pred(self.end_prob)
         self.ends = self.get_pred(self.end_prob)
+
         self.add_weights_bias_summary()
+
         tf.summary.histogram('ans_len', self.ends - self.starts)
+
         self.merged = tf.summary.merge_all()
         self.summary_writer = tf.summary.FileWriter(self.FLAGS.summaries_dir)
         self.saver = tf.train.Saver()
@@ -331,20 +336,22 @@ class QASystem(object):
         with tf.variable_scope('quest_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
             bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
             fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            output, output_fw, output_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
+            output, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
+            output_fw = tf.slice(output, [0, 0, 0], [-1, -1, self.FLAGS.state_size])
+            output_bw = tf.slice(output, [0, 0, self.FLAGS.state_size], [-1, -1,-1])
 
-            last_ix = len(output_bw) - 1
-            bw_c = output_bw[last_ix].c
-            fw_c = output_fw[last_ix].c
-            bw_h = output_bw[last_ix].h
-            fw_h = output_fw[last_ix].h
+            last_ix = len(output_state_bw) - 1
+            bw_c = output_state_bw[last_ix].c
+            fw_c = output_state_fw[last_ix].c
+            bw_h = output_state_bw[last_ix].h
+            fw_h = output_state_fw[last_ix].h
 
 
             last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
             last_hidden_state = tf.concat([fw_h, bw_h], 1)
             #return tf.concat(output, 2), last_hidden_state_tuple, last_hidden_state
 
-            return output, last_hidden_state_tuple, last_hidden_state
+            return output_fw, output_bw, last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
     def get_cont_rep(self, cont_embed, quest_hid_state):
@@ -353,15 +360,18 @@ class QASystem(object):
             fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
             init_states_bw = [quest_hid_state for i in range(3)]
             init_states_fw = [quest_hid_state for i in range(3)]
-            output, output_fw, output_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, cont_embed, initial_states_fw=init_states_fw,initial_states_bw=init_states_bw, sequence_length=self.cont_lens, dtype=tf.float64)
-	    return output
+            output, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, cont_embed, initial_states_fw=init_states_fw,initial_states_bw=init_states_bw, sequence_length=self.cont_lens, dtype=tf.float64)
+            output_fw = tf.slice(output, [0, 0, 0], [-1, -1, self.FLAGS.state_size])
+            output_bw = tf.slice(output, [0, 0, self.FLAGS.state_size], [-1, -1,-1])
+        return output_fw, output_bw
 
     def aggregate(self, att_vecs):
         with tf.variable_scope('agg_lstm', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            output, output_fw, output_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, att_vecs, sequence_length=self.cont_lens, dtype=tf.float64)
-	    return output
+            att_vecs = tf.transpose(att_vecs, [0, 2, 1]) #(batch, cont, num_per*6)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            outputs, output_states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, att_vecs, sequence_length=self.cont_lens, dtype=tf.float64)
+	    return tf.concat([outputs[0], outputs[1]], 2) #(batch, cont, state*2)
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
@@ -375,27 +385,34 @@ class QASystem(object):
             end_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
             return end_lstm_output
 
+
+    def get_logits(self, raw_output, weights, bias, scope_name):
+        #raw_output is (batch, quest+cont_length, embed_size)
+        with tf.variable_scope(scope_name) as scope:
+            logits = []
+            for example in np.arange(self.FLAGS.batch_size):
+                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
+                out = tf.nn.relu(tf.matmul(ex, weights) + bias)
+                logits.append(out) #(1, 300)
+            return tf.squeeze(tf.stack(logits))
+
     def get_beg_logits(self, raw_output):
         #raw_output is (batch, quest+cont_length, embed_size)
         with tf.variable_scope('beg_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
-                #(cont_length, state*2)*(state*2, 1) = (300, 1)
-                out = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1'])
-                #(1,300)*(300, 300) = (1,300)
-                #out = tf.matmul(tf.transpose(hidden), self.weights['beg_mlp_weight2']) + self.biases['beg_mpl_bias2']
+                out = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1']) #(state*2)
+
                 logits.append(out) #(1, 300)
             return tf.squeeze(tf.stack(logits))
 
     def get_end_logits(self, raw_output):
-        #(max_time, state_size*4)
         with tf.variable_scope('end_logits') as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
                 out = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']) + self.biases['end_mpl_bias1'])
-                #out = tf.matmul(tf.transpose(hidden), self.weights['end_mlp_weight2']) +  self.biases['end_mpl_bias2']
                 logits.append(out)
             return tf.squeeze(tf.stack(logits))
 
@@ -409,79 +426,138 @@ class QASystem(object):
                 reshaped.append(out)
             return tf.squeeze(tf.stack(reshaped))
 
-    def calculate_att_vectors(self, quest_last_hid, quest_out, cont_hid):
+    def filter_cont(self, quest, cont):
+        with tf.variable_scope('filter_cont') as scope:
+            quest_norm = tf.nn.l2_normalize(quest, dim=2)
+            cont_norm = tf.nn.l2_normalize(cont, dim=2)
+            all_filtered = []
+            for example in np.arange(self.FLAGS.batch_size):
+                ex_cont_norm = tf.squeeze(tf.slice(cont_norm, [example, 0, 0], [1, -1,-1])) #(cont, state)
+                ex_quest_norm = tf.squeeze(tf.slice(quest_norm, [example, 0, 0], [1, -1,-1])) #(quest, state)
+                prod = tf.matmul(ex_cont_norm, tf.transpose(ex_quest_norm)) #(cont, quest)
+                relev = tf.reduce_max(prod, axis=1) #(cont)
+                ex_cont = tf.squeeze(tf.slice(cont_norm, [example, 0, 0], [1, -1,-1])) #(cont, state)
+                all_filtered.append(tf.multiply(ex_cont, tf.expand_dims(relev, 1))) #(cont, state)
+            return tf.stack(all_filtered)
 
+    def calculate_att_vectors(self, quest_last_hid, quest_out_fw, quest_out_bw, cont_out_fw, cont_out_bw):
         to_return = []
         for example in np.arange(self.FLAGS.batch_size):
-            example_scores = []
-            quest_full_rep = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (1, state*2)
-            quest_reps = tf.squeeze(tf.slice(quest_out, [example, 0, 0], [1, -1, -1])) #(quest_len, state*2)
-            example_reps = tf.squeeze(tf.slice(cont_hid, [example, 0, 0], [1,-1,-1])) #(cont_len, state*2)
+            cont_reps_fw = tf.squeeze(tf.slice(cont_out_fw, [example, 0, 0], [1,-1,-1])) #(cont_len, state)
+            cont_reps_bw = tf.squeeze(tf.slice(cont_out_bw, [example, 0, 0], [1,-1,-1])) #(cont_len, state)
+            quest_reps_fw = tf.squeeze(tf.slice(quest_out_fw, [example, 0, 0], [1,-1,-1])) #(quest_len, state)
+            quest_reps_bw = tf.squeeze(tf.slice(quest_out_bw, [example, 0, 0], [1,-1,-1])) #(quest_len, state)
 
-            full_att = self.get_full_att(quest_full_rep, example_reps)
-            max_att = self.get_max_att(quest_reps, example_reps)
-            mean_att = self.get_mean_att(quest_reps, example_reps)
-            to_return.append(tf.stack([full_att, max_att, mean_att], axis=1))
-            '''
-            quest_full_rep = tf.multiply(quest_full_rep, self.weights['full_att_weight'])
-            example_reps = tf.multiply(example_reps, self.weights['full_att_weight'])
+            full_atts = self.get_full_atts(quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw)
+            max_atts = self.get_reduced_atts(quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw, 'max_atts', self.weights['max_att_weight'], tf.reduce_max)
+            mean_atts = self.get_reduced_atts(quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw, 'mean_atts', self.weights['mean_att_weight'], tf.reduce_mean)
 
-            example_reps = tf.nn.l2_normalize(example_reps, dim=1)
-            quest_full_rep = tf.nn.l2_normalize(quest_full_rep, dim=0)
-            cos_sim = tf.matmul(example_reps, tf.transpose(quest_full_rep)) #(cont_len, state*2).dot(state*2,1) = (cont_len,1)
-            to_return.append(cos_sim) #(cont_len, state*2).dot(state*2,1) = (cont_len,1)
-            '''
+            to_return.append(tf.concat([full_atts, max_atts, mean_atts], axis=0))
+        return tf.stack(to_return)
 
-            #tf.multiply(quest_hid_for_example, weights), tf.multiply(ex_cont)
-            #all_scores.append(tf.matmul(ex_cont, tf.transpose(quest_hid_for_example)))
-        return tf.stack(to_return) # (batch, cont_len *3))
-
-        '''with tf.variable_scope('attention') as scope:
-            all_scores = []
-            for example in np.arange(self.FLAGS.batch_size):
-                quest_hid_for_example = tf.slice(quest_last_hid, [example, 0], [1, -1]) # (400,1)
-                ex_cont = tf.slice(cont_hid, [example, 0, 0], [1,-1,-1])
-                ex_cont = tf.squeeze(ex_cont)
-                #tf.multiply(quest_hid_for_example, weights), tf.multiply(ex_cont)
-                all_scores.append(tf.matmul(ex_cont, tf.transpose(quest_hid_for_example)))
-            return tf.nn.softmax(tf.squeeze(tf.stack(all_scores)))
-        '''
-
+    '''
     def cos_sim(self, first, second, scope_name):
         with tf.variable_scope(scope_name):
             first = tf.nn.l2_normalize(first, dim=1)
             second = tf.nn.l2_normalize(second, dim=1)
             cos_sim = tf.matmul(first, tf.transpose(second))
             return cos_sim
+    '''
 
+    def get_full_atts(self, quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw):
 
-    def get_full_att(self, quest_full_rep, example_reps):
+        last_quest_reps_fw = tf.slice(quest_reps_fw, [self.FLAGS.quest_length-1, 0], [1,-1]) #(1, state)
+        last_quest_reps_bw = tf.slice(quest_reps_fw, [0, 0], [1,-1]) #(1, state)
+        #last_quest_reps_fw = tf.multiply(last_quest_reps_fw, self.weights['full_att_weight']) # (1, state) * (num_per, state) = (num_per, state)
+
+        full_att_fw = self.calc_full_atts(last_quest_reps_fw, cont_reps_fw, self.weights['full_att_weight'], 'fw')
+        full_att_bw = self.calc_full_atts(last_quest_reps_bw, cont_reps_bw, self.weights['full_att_weight'], 'bw')
+        return tf.concat([full_att_fw, full_att_bw], 0) #(num_per, cont)
+
+    def calc_full_atts(self, last_quest_reps, cont_reps, weights, scope_direction):
+        with tf.variable_scope('full_att_{}'.format(scope_direction)) as scope:
+            last_quest_reps = tf.multiply(last_quest_reps, weights)
+            cont_reps_expand = tf.expand_dims(cont_reps, axis=1)
+            weights_expand = tf.expand_dims(weights, axis=0)
+            cont_reps_scaled = tf.multiply(cont_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (cont, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            cont_reps_scaled = tf.nn.l2_normalize(cont_reps_scaled, dim=2) #
+            last_quest_reps = tf.nn.l2_normalize(last_quest_reps, dim=1) #
+            last_quest_reps_expand = tf.expand_dims(last_quest_reps, dim=0) # (1, num_per, state)
+            prod  = tf.multiply(cont_reps_scaled, last_quest_reps_expand) # (cont, per, state) * (1, num_per, state) =  (cont, num_per, state) For cont, for each per, multiply it by the corresponding quest_rep perspective
+            summed = tf.reduce_sum(prod, axis=2) # reduce along the state axis to finish the dot product = (cont, num_per)
+            return tf.transpose(summed)
+
+    '''
+    def get_max_atts(self, quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw):
         with tf.variable_scope('full_att') as scope:
-            quest_full_rep = tf.multiply(quest_full_rep, self.weights['full_att_weight'])
-            example_reps = tf.multiply(example_reps, self.weights['full_att_weight'])
-            quest_full_rep = tf.nn.l2_normalize(quest_full_rep, dim=1)
-            example_reps = tf.nn.l2_normalize(example_reps, dim=1)
-            cos_sim = tf.matmul(quest_full_rep, tf.transpose(example_reps))
-            return tf.squeeze(cos_sim)
 
-    def get_max_att(self, quest_reps, example_reps):
-        with tf.variable_scope('max_att') as scope:
-            quest_reps = tf.multiply(quest_reps, self.weights['max_att_weight'])
-            example_reps = tf.multiply(example_reps, self.weights['max_att_weight'])
-            quest_reps = tf.nn.l2_normalize(quest_reps, dim=1)
-            example_reps = tf.nn.l2_normalize(example_reps, dim=1)
-            prod = tf.matmul(example_reps, tf.transpose(quest_reps)) # (cont, embed).dot(embed, quest) = (cont, quest)
-            return tf.reduce_max(prod, axis=1) # (cont, 1)
+            last_quest_reps_fw = tf.slice(quest_reps_fw, [self.FLAGS.quest_length-1, 0], [1,-1]) #(1, state)
+            last_quest_reps_bw = tf.slice(quest_reps_fw, [0, 0], [1,-1]) #(1, state)
+            last_quest_reps_fw = tf.multiply(last_quest_reps_fw, self.weights['full_max_weight']) # (1, state) * (num_per, state) = (num_per, state)
 
-    def get_mean_att(self, quest_reps, example_reps):
-        with tf.variable_scope('mean_att') as scope:
-            quest_reps = tf.multiply(quest_reps, self.weights['max_att_weight'])
-            example_reps = tf.multiply(example_reps, self.weights['max_att_weight'])
-            quest_reps = tf.nn.l2_normalize(quest_reps, dim=1)
-            example_reps = tf.nn.l2_normalize(example_reps, dim=1)
-            prod = tf.matmul(example_reps, tf.transpose(quest_reps)) # (cont, embed).dot(embed, quest) = (cont, quest)
-            return tf.reduce_mean(prod, axis=1) # (cont, 1)
+            cont_reps_fw_expand = tf.expand_dims(cont_reps_fw, axis=1)
+            weights_expand = tf.expand_dims(self.weights['max_att_weight'], axis=0)
+            cont_reps_fw_scaled = tf.multiply(cont_reps_fw_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (cont, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            cont_reps_fw_scaled = tf.nn.l2_normalize(cont_reps_fw_scaled, dim=2) #
+            quest_reps_fw_expand = tf.expand_dims(quest_reps_fw, axis=1) #
+            quest_reps_fw_scaled = tf.multiply(quest_reps_fw_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (quest, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            quest_reps_fw_scaled = tf.nn.l2_normalize(quest_reps_fw_scaled, dim=2) #
 
+            #you want to multiply each cont by every quest. (cont, num_per, state) * (quest, num_per, state)
+            all_maxes = []
+            for i in np.arange(self.FLAGS.num_perspectives):
+                quest_per = tf.squeeze(tf.slice(quest_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (quest, state)
+                cont_per = tf.squeeze(tf.slice(cont_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (cont, state)
+                prod = tf.matmul(cont_per, tf.transpose(quest_per)) # (cont, state).dot(state, quest) = (cont, quest)
+                all_maxes.append(tf.reduce_max(prod, axis=1)) # (cont, 1s)
+
+            return tf.stack(all_maxes) # (num_per, cont)
+
+    def calc_max_atts(self, quest_reps, cont_reps, weights, scope_dir):
+        with tf.variable_scope('max_att'.format(scope_dir)) as scope:
+            cont_reps_expand = tf.expand_dims(cont_reps, axis=1)
+            weights_expand = tf.expand_dims(weights, axis=0)
+            cont_reps_scaled = tf.multiply(cont_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (cont, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            cont_reps_scaled = tf.nn.l2_normalize(cont_reps_scaled, dim=2) #
+            quest_reps_expand = tf.expand_dims(quest_reps, axis=1) #
+            quest_reps_scaled = tf.multiply(quest_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (quest, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            quest_reps_scaled = tf.nn.l2_normalize(quest_reps_scaled, dim=2) #
+
+            #you want to multiply each cont by every quest. (cont, num_per, state) * (quest, num_per, state)
+            all_maxes = []
+            for i in np.arange(self.FLAGS.num_perspectives):
+                quest_per = tf.squeeze(tf.slice(quest_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (quest, state)
+                cont_per = tf.squeeze(tf.slice(cont_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (cont, state)
+                prod = tf.matmul(cont_per, tf.transpose(quest_per)) # (cont, state).dot(state, quest) = (cont, quest)
+                all_maxes.append(tf.reduce_max(prod, axis=1)) # (cont, 1s)
+
+            return tf.stack(all_maxes)
+    '''
+    def get_reduced_atts(self, quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw, scope_name, weights, reduce_fn):
+        with tf.variable_scope(scope_name) as scope:
+            fw_atts = self.calc_reduced_atts(quest_reps_fw, cont_reps_fw, 'fw', weights, reduce_fn)
+            bw_atts = self.calc_reduced_atts(quest_reps_bw, cont_reps_bw, 'bw', weights, reduce_fn)
+            return tf.concat([fw_atts, bw_atts], 0)
+
+    def calc_reduced_atts(self, quest_reps, cont_reps, scope_dir, weights, reduce_fn):
+        with tf.variable_scope(scope_dir) as scope:
+            cont_reps_expand = tf.expand_dims(cont_reps, axis=1)
+            weights_expand = tf.expand_dims(weights, axis=0)
+            cont_reps_scaled = tf.multiply(cont_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (cont, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            cont_reps_scaled = tf.nn.l2_normalize(cont_reps_scaled, dim=2) #
+            quest_reps_expand = tf.expand_dims(quest_reps, axis=1) #
+            quest_reps_scaled = tf.multiply(quest_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (quest, per, state) For each cont_rep, we have N perspectives, each of which is state length long
+            quest_reps_scaled = tf.nn.l2_normalize(quest_reps_scaled, dim=2) #
+
+            #you want to multiply each cont by every quest. (cont, num_per, state) * (quest, num_per, state)
+            all_reduced = []
+            for i in np.arange(self.FLAGS.num_perspectives):
+                quest_per = tf.squeeze(tf.slice(quest_reps_scaled, [0, i, 0], [-1,1,-1])) # (quest, state)
+                cont_per = tf.squeeze(tf.slice(cont_reps_scaled, [0, i, 0], [-1,1,-1])) # (cont, state)
+                prod = tf.matmul(cont_per, tf.transpose(quest_per)) # (cont, state).dot(state, quest) = (cont, quest)
+                all_reduced.append(reduce_fn(prod, axis=1)) # (cont, 1s)
+
+            return tf.stack(all_reduced) # (num_per, cont)
 
     def scale_cont(self, cont, att):
         scaled = []
@@ -511,27 +587,17 @@ class QASystem(object):
     def add_prediction_op(self):
         self.quest_lens, self.cont_lens = self.get_lens()
 
-        quest_embed, cont_embed = self.add_embeddings()
-        quest_out, quest_last_hid_tuple, quest_last_hid = self.get_quest_rep(quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
-        self.quest_last_hid = quest_last_hid
-        self.quest_out = quest_out
-        cont_out = self.get_cont_rep(cont_embed, quest_last_hid_tuple)
-        self.cont_out = cont_out
-        self.att_vectors = self.calculate_att_vectors(quest_last_hid, quest_out, cont_out)
-        '''self.scaled_cont = self.scale_cont(cont_out, self.att_vectors)
-        self.scaled_cont_concat = tf.concat([self.scaled_cont, self.cont_out], axis=2)
-        self.scaled_cont_concat = self.transform_scaled_cont_concat(self.scaled_cont_concat)
-        self.beg_lstm_output = self.beg_lstm(self.scaled_cont_concat)
-        self.end_lstm_output = self.end_lstm(self.scaled_cont_concat)
-        self.beg_logits = self.apply_mask(self.get_beg_logits(self.beg_lstm_output))
-        self.end_logits = self.apply_mask(self.get_end_logits(self.beg_lstm_output))
-        return self.beg_logits, self.end_logits
-        '''
-        self.aggregated = self.aggregate(self.att_vectors)
-        self.beg_logits = self.apply_mask(self.get_beg_logits(self.aggregated))
-        self.end_logits = self.apply_mask(self.get_end_logits(self.aggregated))
-        return self.beg_logits, self.end_logits
+        self.quest_embed, self.cont_embed = self.add_embeddings()
+        self.filtered_cont = self.filter_cont(self.quest_embed, self.cont_embed)
+        self.quest_out_fw, self.quest_out_bw, self.quest_last_hid_tuple, self.quest_last_hid = self.get_quest_rep(self.quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
 
+        self.cont_out_fw, self.cont_out_bw = self.get_cont_rep(self.filtered_cont, self.quest_last_hid_tuple)
+
+        self.att_vectors = self.calculate_att_vectors(self.quest_last_hid, self.quest_out_fw, self.quest_out_bw, self.cont_out_fw, self.cont_out_bw) # (batch, num_per*6, cont)
+        self.aggregated = self.aggregate(self.att_vectors)
+        self.beg_logits = self.apply_mask(self.get_logits(self.aggregated, self.weights['beg_mlp_weight1'], self.biases['beg_mpl_bias1'], 'beg_logits')) #(state*2)
+        self.end_logits = self.apply_mask(self.get_logits(self.aggregated, self.weights['end_mlp_weight1'], self.biases['end_mpl_bias1'], 'end_logits'))
+        return self.beg_logits, self.end_logits
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
@@ -616,8 +682,9 @@ class QASystem(object):
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        #agg =  sess.run(self.aggregated, feed_dict=feed)
-        train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged, cont_out =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged, self.cont_out], feed_dict=feed)
+        #fcont =  sess.run(self.filtered_cont, feed_dict=feed)
+        #pdb.set_trace()
+        train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
         return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
 
     def validate_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
@@ -637,8 +704,10 @@ class QASystem(object):
             running_loss +=loss
             avg_span = np.mean(np.maximum(0, ends-starts))
             print('loss: {:.2E}, grad_norm: {}, avg_span: {}'.format(loss, grad_norm, avg_span))
-            self.write_prob(beg_prob, end_prob)
-            self.write_summaries(merged, epoch, i, num_batches)
+            if i % 200 == 0:
+                self.write_summaries(merged, epoch, i, num_batches)
+                self.write_prob(beg_prob, end_prob)
+
             running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
             #if epoch > 12:
                 #pdb.set_trace()
@@ -679,11 +748,11 @@ class QASystem(object):
         print('')
         return best_score, epoch
 
-    def write_to_train_logs(self, f1, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1):
+    def write_to_train_logs(self, f1, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1, epoch_dur):
         with open(self.FLAGS.train_stats_file, 'a') as f:
             max_beg_prob = np.mean(np.max(beg_prob, axis=1))
             max_end_prob = np.mean(np.max(end_prob, axis=1))
-            f.write("{},{},{},{},{},{},{},{}\n".format(f1, loss, grad_norm, avg_span, max_beg_prob, max_end_prob,val_loss, val_f1))
+            f.write("{},{},{},{},{},{},{},{}, {}\n".format(f1, loss, grad_norm, avg_span, max_beg_prob, max_end_prob, val_f1, val_loss, epoch_dur))
 
     def save_model(self, best_score, epoch, saver, sess):
         if saver:
@@ -736,8 +805,9 @@ class QASystem(object):
 
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
             toc = time.time()
-            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1)
-            logger.info("Epoch took {} minutes", ((toc - tic) / 60))
+            epoch_dur = (toc - tic) / 60
+            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1, epoch_dur)
+            logger.info("Epoch took {} minutes".format(epoch_dur))
 
             #logger.info("Epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
 
@@ -789,7 +859,7 @@ class QASystem(object):
         saver = self.saver
         tic = time.time()
         params = tf.trainable_variables()
-        num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+        #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
         toc = time.time()
-        logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
+        #logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
         self.fit(session, saver, tr_set, val_set, train_dir)
