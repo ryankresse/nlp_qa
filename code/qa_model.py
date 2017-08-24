@@ -147,7 +147,6 @@ class QASystem(object):
         self.dropout_placeholder = tf.placeholder(tf.float32, shape=(None))
 
 
-
     def setup_system(self):
         """
         After your modularized implementation of encoder and decoder
@@ -334,9 +333,16 @@ class QASystem(object):
 
     def get_quest_rep(self, quest_embed):
         with tf.variable_scope('quest_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
+            '''
             bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
             fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            output, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
+            '''
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            outputs, output_states, = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
+            concat_outputs = tf.concat(outputs, 2)
+            return tf.squeeze(tf.slice(concat_outputs, [0, self.FLAGS.quest_length-1, 0], [-1, 1, -1])) # (batch, state*2)
+            '''
             output_fw = tf.slice(output, [0, 0, 0], [-1, -1, self.FLAGS.state_size])
             output_bw = tf.slice(output, [0, 0, self.FLAGS.state_size], [-1, -1,-1])
 
@@ -350,20 +356,58 @@ class QASystem(object):
             last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
             last_hidden_state = tf.concat([fw_h, bw_h], 1)
             #return tf.concat(output, 2), last_hidden_state_tuple, last_hidden_state
+            '''
 
-            return output_fw, output_bw, last_hidden_state_tuple, last_hidden_state
             #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
 
-    def get_cont_rep(self, cont_embed, quest_hid_state):
-        with tf.variable_scope('cont_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            init_states_bw = [quest_hid_state for i in range(3)]
-            init_states_fw = [quest_hid_state for i in range(3)]
-            output, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, cont_embed, initial_states_fw=init_states_fw,initial_states_bw=init_states_bw, sequence_length=self.cont_lens, dtype=tf.float64)
-            output_fw = tf.slice(output, [0, 0, 0], [-1, -1, self.FLAGS.state_size])
-            output_bw = tf.slice(output, [0, 0, self.FLAGS.state_size], [-1, -1,-1])
-        return output_fw, output_bw
+    def C_lstm(self, C, scope_name):
+        with tf.variable_scope(scope_name, initializer=tf.contrib.layers.xavier_initializer()) as scope:
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            outputs, output_states, = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, C, sequence_length=self.cont_lens, dtype=tf.float64)
+        return tf.concat(outputs, 2) #(batch,cont, state*2)
+
+    def get_memory_output_cont_rep(self, cont_embed):
+        with tf.variable_scope('memory_output_cont_rep', initializer=tf.contrib.layers.xavier_initializer()) as scope:
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            outputs, output_states, = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, cont_embed, sequence_length=self.cont_lens, dtype=tf.float64)
+        return tf.concat(outputs, 2) #(batch,cont, state*2)
+
+    def get_init_cont_rep(self, cont_embed):
+        with tf.variable_scope('init_cont_rep', initializer=tf.contrib.layers.xavier_initializer()) as scope:
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            outputs, output_states, = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, cont_embed, sequence_length=self.cont_lens, dtype=tf.float64)
+        return tf.concat(outputs, 2) #(batch,cont, state*2)
+
+    def memory_component(self, quest_embed, cont_embed, num_hops):
+        with tf.variable_scope('memory_component') as scope:
+            U = self.get_quest_rep(quest_embed) #(batch, state*2)
+            A = self.get_init_cont_rep(cont_embed) #(batch, cont, state*2)
+
+            for hop in range(num_hops):
+                relev_scores = tf.expand_dims(self.get_relev_scores(U, A), 2) #(batch, cont)
+                C = self.get_memory_output_cont_rep(cont_embed) #(batch, cont, state*2)
+                O = tf.reduce_sum(tf.multiply(C, relev_scores), axis=1) #(batch, state*2)
+                U += O
+                A = C
+                scope.reuse_variables()
+        return U, C
+
+    def get_relev_scores(self, U, A):
+        relev_scores = []
+        U_expand = tf.expand_dims(U, 2)
+        return tf.nn.softmax(tf.squeeze(tf.matmul(A, U_expand)))
+
+        #(batch, cont, quest)
+        '''
+        for ex in range(self.FLAGS.batch_size):
+            ex_cont = tf.squeeze(tf.slice(A, [ex, 0, 0], [1, -1, -1]))
+            ex_quest = tf.slice(U, [ex, 0], [1, -1])
+            relev_scores.append(tf.nn.softmax(tf.matmul(ex_cont, tf.transpose(ex_quest)))) # ()
+        '''
+        #return tf.squeeze(tf.stack(relev_scores))
 
     def aggregate(self, att_vecs):
         with tf.variable_scope('agg_lstm', initializer=tf.contrib.layers.xavier_initializer()) as scope:
@@ -373,12 +417,6 @@ class QASystem(object):
             outputs, output_states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, att_vecs, sequence_length=self.cont_lens, dtype=tf.float64)
 	    return tf.concat([outputs[0], outputs[1]], 2) #(batch, cont, state*2)
 
-    def beg_lstm(self, cont_scaled):
-        with tf.variable_scope('beg_lstm') as scope:
-            cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
-            beg_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
-            return beg_lstm_output
-
     def end_lstm(self, cont_scaled):
         with tf.variable_scope('end_lstm') as scope:
             cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
@@ -386,15 +424,13 @@ class QASystem(object):
             return end_lstm_output
 
 
-    def get_logits(self, raw_output, weights, bias, scope_name):
-        #raw_output is (batch, quest+cont_length, embed_size)
+    def get_logits(self, raw_outputs, weights, bias, scope_name):
+        #raw_output is (batch, cont, state*2)
+        #weights is (batch, state*2)
+        weights = tf.expand_dims(weights, 2)
+        bias = tf.expand_dims(bias, 0)
         with tf.variable_scope(scope_name) as scope:
-            logits = []
-            for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
-                out = tf.nn.relu(tf.matmul(ex, weights) + bias)
-                logits.append(out) #(1, 300)
-            return tf.squeeze(tf.stack(logits))
+            return tf.squeeze(tf.nn.relu(tf.matmul(raw_outputs, weights) + bias))
 
     def get_beg_logits(self, raw_output):
         #raw_output is (batch, quest+cont_length, embed_size)
@@ -588,6 +624,11 @@ class QASystem(object):
         self.quest_lens, self.cont_lens = self.get_lens()
 
         self.quest_embed, self.cont_embed = self.add_embeddings()
+        #self.init_quest_rep = self.get_init_quest_rep(self.quest_embed)
+        #self.init_cont_rep = self.get_init_cont_rep(self.cont_embed)
+        self.memory_state, self.final_C = self.memory_component(self.quest_embed, self.cont_embed, self.FLAGS.num_hops)
+
+        '''
         self.filtered_cont = self.filter_cont(self.quest_embed, self.cont_embed)
         self.quest_out_fw, self.quest_out_bw, self.quest_last_hid_tuple, self.quest_last_hid = self.get_quest_rep(self.quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
 
@@ -595,8 +636,12 @@ class QASystem(object):
 
         self.att_vectors = self.calculate_att_vectors(self.quest_last_hid, self.quest_out_fw, self.quest_out_bw, self.cont_out_fw, self.cont_out_bw) # (batch, num_per*6, cont)
         self.aggregated = self.aggregate(self.att_vectors)
-        self.beg_logits = self.apply_mask(self.get_logits(self.aggregated, self.weights['beg_mlp_weight1'], self.biases['beg_mpl_bias1'], 'beg_logits')) #(state*2)
-        self.end_logits = self.apply_mask(self.get_logits(self.aggregated, self.weights['end_mlp_weight1'], self.biases['end_mpl_bias1'], 'end_logits'))
+        '''
+        self.beg_C = self.C_lstm(self.final_C, 'beg_C_lstm')
+        self.end_C = self.C_lstm(self.final_C, 'end_C_lstm')
+        self.beg_logits = self.apply_mask(self.get_logits(self.beg_C, self.memory_state, self.biases['beg_mpl_bias1'], 'beg_logits')) #(state*2)
+        self.end_logits = self.apply_mask(self.get_logits(self.end_C, self.memory_state, self.biases['end_mpl_bias1'], 'end_logits'))
+
         return self.beg_logits, self.end_logits
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
@@ -683,8 +728,6 @@ class QASystem(object):
 
     def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        #fcont =  sess.run(self.filtered_cont, feed_dict=feed)
-        #pdb.set_trace()
         train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
         return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
 
