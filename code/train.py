@@ -125,7 +125,7 @@ def test_device_placement():
 def main(_):
     test_device_placement()
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
-    prepend = ''  if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
+    prepend = '' #  if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
 
 
     print('Reading data')
