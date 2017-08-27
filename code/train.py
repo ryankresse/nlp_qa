@@ -15,7 +15,7 @@ import shutil
 import logging
 
 logging.basicConfig(level=logging.INFO)
-MODEL_NAME= 'mult_per'
+MODEL_NAME= 'mult_per_load'
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
@@ -147,14 +147,14 @@ def main(_):
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
 
-    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word)
+    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, tr_set, val_set)
 
     if not os.path.exists(FLAGS.log_dir):
         os.makedirs(FLAGS.log_dir)
     file_handler = logging.FileHandler(pjoin(FLAGS.log_dir, "log.txt"))
     logging.getLogger().addHandler(file_handler)
 
-    print(vars(FLAGS))
+    #print(vars(FLAGS))
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
@@ -164,6 +164,7 @@ def main(_):
         #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, FLAGS.train_dir)
         #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
+        pdb.set_trace()
         qa.train(sess, tr_set, val_set, FLAGS.train_dir)
 
         qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)

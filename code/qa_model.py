@@ -83,8 +83,11 @@ class QASystem(object):
         self.FLAGS = args[0]
         embed_path = args[1]
         self.idx_word = args[2]
-        self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove']
+        self.tr_set = args[3]
+        self.val_set = args[4]
 
+        self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove']
+        self.isTest = False
         # ==== set up placeholder tokens ========
         self.cont_placeholer = None
         self.quest_placeholder = None
@@ -92,11 +95,9 @@ class QASystem(object):
         self.dropout_placeholder = None
 
 
-        self.add_placeholders()
+        #self.add_placeholders()
         # ==== assemble pieces ====
         with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
-            #self.setup_embeddings()
-            #self.set_add_prediction_op()
             self.add_weights()
             self.add_biases()
             self.setup_system()
@@ -147,6 +148,31 @@ class QASystem(object):
         self.dropout_placeholder = tf.placeholder(tf.float32, shape=(None))
 
 
+    def create_datasets(self):
+
+        self.quest_data_placeholder =  tf.placeholder(tf.int64, shape=(None, self.FLAGS.quest_length))
+        self.cont_data_placeholder = tf.placeholder(tf.int64, shape=(None, self.FLAGS.cont_length))
+        self.ans_data_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
+
+        '''
+        self.quest_text_placeholder =  tf.placeholder(tf.string, shape=(None))
+        self.cont_text_placeholder = tf.placeholder(tf.string, shape=(None))
+        self.ans_text_placeholder = tf.placeholder(tf.string, shape=(None))
+        '''
+
+        self.tr_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
+        self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set[0].shape[0])
+        self.tr_dataset = self.tr_dataset.batch(self.FLAGS.batch_size)
+
+        self.val_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
+        self.val_dataset = self.val_dataset.batch(self.FLAGS.batch_size)
+        shapes = (tf.TensorShape([None, self.FLAGS.quest_length]), tf.TensorShape([None, self.FLAGS.cont_length]), tf.TensorShape([None, self.FLAGS.ans_length]))
+        self.iterator = tf.contrib.data.Iterator.from_structure((tf.int64, tf.int64, tf.int32), shapes)
+        self.tr_inititializer = self.iterator.make_initializer(self.tr_dataset)
+        self.val_inititializer = self.iterator.make_initializer(self.val_dataset)
+
+        #self.val_iterator =self.val_dataset.make_initializable_iterator()
+
 
     def setup_system(self):
         """
@@ -155,11 +181,18 @@ class QASystem(object):
         to assemble your reading comprehension system!
         :return:
         """
-        self.lr = self.FLAGS.learning_rate
 
+        '''
+        self.tr_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
+        self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set[0].shape[0])
+        self.tr_dataset = self.tr_dataset.batch(self.FLAGS.batch_size)
+        self.iterator =self.tr_dataset.make_initializable_iterator()
+        '''
+        self.create_datasets()
+        self.lr = self.FLAGS.learning_rate
         self.beg_logits, self.end_logits = self.add_prediction_op()
 
-        self.beg_labels, self.end_labels = self.get_labels(self.ans_placeholder)
+        self.beg_labels, self.end_labels = self.get_labels(self.ans)
         self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
         tf.summary.scalar('loss', self.loss)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
@@ -173,7 +206,7 @@ class QASystem(object):
         self.starts = self.get_pred(self.end_prob)
         self.ends = self.get_pred(self.end_prob)
 
-        self.add_weights_bias_summary()
+        #self.add_weights_bias_summary()
 
         tf.summary.histogram('ans_len', self.ends - self.starts)
 
@@ -183,7 +216,7 @@ class QASystem(object):
 
     def apply_mask(self, items):
         items_flat = tf.reshape(items, [-1])
-        cont_flat = tf.reshape(self.cont_placeholder, [-1])
+        cont_flat = tf.reshape(self.cont, [-1])
         mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
         masked_items = items_flat * mask
         masked_items = tf.reshape(masked_items, tf.shape(items))
@@ -214,8 +247,8 @@ class QASystem(object):
         """
         with vs.variable_scope("embeddings"):
             embeddings = self.pretrained_embeddings
-            quest_embed = tf.nn.embedding_lookup(embeddings, self.quest_placeholder)
-            cont_embed = tf.nn.embedding_lookup(embeddings, self.cont_placeholder)
+            quest_embed = tf.nn.embedding_lookup(embeddings, self.quest)
+            cont_embed = tf.nn.embedding_lookup(embeddings, self.cont)
         return (quest_embed, cont_embed)
 
     def add_train_op(self, loss):
@@ -487,52 +520,6 @@ class QASystem(object):
             summed = tf.reduce_sum(prod, axis=2) # reduce along the state axis to finish the dot product = (cont, num_per)
             return tf.transpose(summed)
 
-    '''
-    def get_max_atts(self, quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw):
-        with tf.variable_scope('full_att') as scope:
-
-            last_quest_reps_fw = tf.slice(quest_reps_fw, [self.FLAGS.quest_length-1, 0], [1,-1]) #(1, state)
-            last_quest_reps_bw = tf.slice(quest_reps_fw, [0, 0], [1,-1]) #(1, state)
-            last_quest_reps_fw = tf.multiply(last_quest_reps_fw, self.weights['full_max_weight']) # (1, state) * (num_per, state) = (num_per, state)
-
-            cont_reps_fw_expand = tf.expand_dims(cont_reps_fw, axis=1)
-            weights_expand = tf.expand_dims(self.weights['max_att_weight'], axis=0)
-            cont_reps_fw_scaled = tf.multiply(cont_reps_fw_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (cont, per, state) For each cont_rep, we have N perspectives, each of which is state length long
-            cont_reps_fw_scaled = tf.nn.l2_normalize(cont_reps_fw_scaled, dim=2) #
-            quest_reps_fw_expand = tf.expand_dims(quest_reps_fw, axis=1) #
-            quest_reps_fw_scaled = tf.multiply(quest_reps_fw_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (quest, per, state) For each cont_rep, we have N perspectives, each of which is state length long
-            quest_reps_fw_scaled = tf.nn.l2_normalize(quest_reps_fw_scaled, dim=2) #
-
-            #you want to multiply each cont by every quest. (cont, num_per, state) * (quest, num_per, state)
-            all_maxes = []
-            for i in np.arange(self.FLAGS.num_perspectives):
-                quest_per = tf.squeeze(tf.slice(quest_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (quest, state)
-                cont_per = tf.squeeze(tf.slice(cont_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (cont, state)
-                prod = tf.matmul(cont_per, tf.transpose(quest_per)) # (cont, state).dot(state, quest) = (cont, quest)
-                all_maxes.append(tf.reduce_max(prod, axis=1)) # (cont, 1s)
-
-            return tf.stack(all_maxes) # (num_per, cont)
-
-    def calc_max_atts(self, quest_reps, cont_reps, weights, scope_dir):
-        with tf.variable_scope('max_att'.format(scope_dir)) as scope:
-            cont_reps_expand = tf.expand_dims(cont_reps, axis=1)
-            weights_expand = tf.expand_dims(weights, axis=0)
-            cont_reps_scaled = tf.multiply(cont_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (cont, per, state) For each cont_rep, we have N perspectives, each of which is state length long
-            cont_reps_scaled = tf.nn.l2_normalize(cont_reps_scaled, dim=2) #
-            quest_reps_expand = tf.expand_dims(quest_reps, axis=1) #
-            quest_reps_scaled = tf.multiply(quest_reps_expand, weights_expand) # (cont, 1, state) * (1, num_per, state) = (quest, per, state) For each cont_rep, we have N perspectives, each of which is state length long
-            quest_reps_scaled = tf.nn.l2_normalize(quest_reps_scaled, dim=2) #
-
-            #you want to multiply each cont by every quest. (cont, num_per, state) * (quest, num_per, state)
-            all_maxes = []
-            for i in np.arange(self.FLAGS.num_perspectives):
-                quest_per = tf.squeeze(tf.slice(quest_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (quest, state)
-                cont_per = tf.squeeze(tf.slice(cont_reps_fw_scaled, [0, i, 0], [-1,1,-1])) # (cont, state)
-                prod = tf.matmul(cont_per, tf.transpose(quest_per)) # (cont, state).dot(state, quest) = (cont, quest)
-                all_maxes.append(tf.reduce_max(prod, axis=1)) # (cont, 1s)
-
-            return tf.stack(all_maxes)
-    '''
     def get_reduced_atts(self, quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw, scope_name, weights, reduce_fn):
         with tf.variable_scope(scope_name) as scope:
             fw_atts = self.calc_reduced_atts(quest_reps_fw, cont_reps_fw, 'fw', weights, reduce_fn)
@@ -572,8 +559,8 @@ class QASystem(object):
         return tf.stack(scaled)
 
     def get_lens(self):
-        quest_mask = tf.sign(self.quest_placeholder)
-        cont_mask = tf.sign(self.cont_placeholder)
+        quest_mask = tf.sign(self.quest)
+        cont_mask = tf.sign(self.cont)
         quest_lens = tf.reduce_sum(quest_mask,axis=1)
         cont_lens = tf.reduce_sum(cont_mask ,axis=1)
         return quest_lens, cont_lens
@@ -585,6 +572,10 @@ class QASystem(object):
         return tf.squeeze(beg_labels), tf.squeeze(end_labels)
 
     def add_prediction_op(self):
+
+
+        self.quest, self.cont, self.ans = self.iterator.get_next()
+
         self.quest_lens, self.cont_lens = self.get_lens()
 
         self.quest_embed, self.cont_embed = self.add_embeddings()
@@ -605,41 +596,12 @@ class QASystem(object):
         _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
         return loss, logits, grad_norm
 
-    def get_ans_words(self, starts_ends, cont):
-        words = []
-        for ix in np.arange(starts_ends.shape[0]):
-            start = starts_ends[ix, 0]; end = starts_ends[ix,1];
-            if start > end:
-                words.append([])
-            elif start == end:
-                words.append([self.idx_word[cont[ix, start]]])
-            else:
-                tokens = cont[ix, start:end + 1]
-                words.append([self.idx_word[tok] for tok in tokens])
-
-        return [" ".join(w) for w in words]
-
-
     def get_pred(self, probs):
         return tf.argmax(probs, axis=1)
 
     def evaluate_performance(self, pred_ans_words, ans_text):
         f1 =  get_f1_score(pred_ans_words, ans_text.tolist())
         return f1
-
-
-    def debug_epoch(self, sess, train_examples, num_batches):
-        print('DEBUGGING')
-        for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
-            print('Batch {} of {}'.format(i, num_batches))
-            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4];
-
-            loss, logits, grad_norm = self.train_on_batch(sess, quest, cont, ans)
-            if (i+1) % 5 == 0:
-                pred_ans_words, true_ans_words = self.get_ans_words(logits, ans, cont_text, self.FLAGS.cont_length)
-                words_pred = np.sum([len(ans.split()) for ans in pred_ans_words])
-                f1 = self.evaluate_performance(pred_ans_words, true_ans_words, ans_text)
-                print('batch {}, loss: {}, f1: {}, grad_norm: {}, words predicted: {}'.format(i, loss, f1, grad_norm, words_pred))
 
     def write_summaries(self, summaries, epoch, batch, num_batches):
         self.summary_writer.add_summary(summaries, (epoch * num_batches) + batch)
@@ -661,11 +623,25 @@ class QASystem(object):
             tf.summary.scalar('mean', mean)
             tf.summary.histogram('histogram', var)
 
-    def get_f1(self, ans, cont, starts, ends, ans_text):
-        #true_words = self.get_ans_words(ans, cont)
+    def get_ans_words(self, starts_ends, cont):
+        words = []
+
+        for ix in np.arange(starts_ends.shape[0]):
+            start = starts_ends[ix, 0]; end = starts_ends[ix,1];
+            if start > end:
+                words.append([])
+            elif start == end:
+                #select the token from the training example at the start position, then get the word for it
+                words.append([self.idx_word[cont[ix, start]]])
+            else:
+                tokens = cont[ix, start:end + 1]
+                words.append([self.idx_word[tok] for tok in tokens])
+
+        return [" ".join(w) for w in words]
+
+    def get_f1(self, cont, starts, ends, ans_text):
         pred_words = self.get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), cont)
         f1 = self.evaluate_performance(pred_words, ans_text)
-        #print('f1: {}'.format(f1))
         return f1
 
     def compute_and_report_epoch_stats(self, epoch, running_loss, running_f1, num_batches, report_type='train'):
@@ -676,61 +652,71 @@ class QASystem(object):
         print("")
         return avg_loss, avg_f1
 
-
     def write_prob(self, beg_prob, end_prob):
         np.save(self.FLAGS.beg_prob_file, beg_prob)
         np.save(self.FLAGS.end_prob_file, end_prob)
 
-    def train_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
-        feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        #fcont =  sess.run(self.filtered_cont, feed_dict=feed)
-        #pdb.set_trace()
-        train_op, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, clip_value, starts, ends, merged =  sess.run([self.train_op, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.clip_val, self.starts, self.ends, self.merged], feed_dict=feed)
-        return loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged
+    def train_on_batch(self, sess):
+        to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
+        train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
+        return loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged
 
-    def validate_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
-        feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        loss, starts, ends =  sess.run([self.loss, self.starts, self.ends], feed_dict=feed)
-        return loss, starts, ends
+    def validate_on_batch(self, sess):
+        loss, ans, cont, starts, ends  =  sess.run([self.loss, self.ans, self.cont, self.starts, self.ends])
+        return loss, ans, cont, starts, ends
+
+    def validate(self, sess, val_set, epoch):
+        num_batches = int(len(val_set[0]) / self.FLAGS.batch_size)
+        running_loss = 0
+        feed_dict= {
+            self.quest_data_placeholder: val_set[0],
+            self.cont_data_placeholder:val_set[1],
+            self.ans_data_placeholder:val_set[2]
+        }
+        sess.run(self.val_inititializer, feed_dict=feed_dict)
+        all_starts = []
+        all_ends = []
+        for i in range(num_batches -1):
+            print('Batch {} of {}'.format(i+1, num_batches))
+            if i == 2: break
+            #if (i == num_batches-1): break
+            loss, ans, cont, starts, ends = self.validate_on_batch(sess)
+            all_starts.append(starts)
+            all_ends.append(ends)
+            running_loss +=loss
+
+        all_starts = np.hstack(all_starts)
+        all_ends = np.hstack(all_ends)
+        f1 = self.get_f1(self.val_set[1][:64, :], all_starts, all_ends, self.val_set[4][:64])
+        avg_loss = running_loss / num_batches
+        print('Epoch {} val loss: {:.2E}, f1: {}'.format(epoch, avg_loss, f1))
+        print('=========================')
+        return avg_loss, f1
 
     def run_epoch(self, sess, train_examples, epoch):
         num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size)
         running_loss = 0; running_f1 = 0;
-        for i, batch in enumerate(minibatches(train_examples, self.FLAGS.batch_size)):
+        for i in range(num_batches - 1):
             print('Batch {} of {}'.format(i+1, num_batches))
-            #if (i == 1): break #
-            if (i == num_batches - 1): break #
-            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
-            loss, beg_logits, end_logits, beg_prob, end_prob, starts, ends, grad_norm, clip_value, merged  = self.train_on_batch(sess, quest, cont, ans)
+            sess.run(self.tr_inititializer, feed_dict={self.quest_data_placeholder: train_examples[0], self.cont_data_placeholder:train_examples[1], self.ans_data_placeholder:train_examples[2]})
+
+            if (i == 15): break #
+            #if (i == num_batches - 1): break #
+            loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged  = self.train_on_batch(sess)
             running_loss +=loss
-            avg_span = np.mean(np.maximum(0, ends-starts))
-            print('loss: {:.2E}, grad_norm: {}, avg_span: {}'.format(loss, grad_norm, avg_span))
+            print('loss: {:.2E}, grad_norm: {}'.format(loss, grad_norm))
             if i % 200 == 0:
                 self.write_summaries(merged, epoch, i, num_batches)
                 self.write_prob(beg_prob, end_prob)
 
-            running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
-            #if epoch > 12:
-                #pdb.set_trace()
+        avg_loss = running_loss / num_batches
 
-        avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches)
-        return avg_loss, avg_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span
+        print('Epoch {} train loss: {:.2E}'.format(epoch, avg_loss))
+        print('=========================')
 
-    def validate(self, sess, val_set, epoch):
-        num_batches = int(len(val_set[0]) / self.FLAGS.batch_size)
-        running_loss = 0; running_f1 = 0;
-        for i, batch in enumerate(minibatches(val_set, self.FLAGS.batch_size)):
-            print('Batch {} of {}'.format(i+1, num_batches))
-            #if i ==1: break
-            if (i == num_batches-1): break
-            quest = batch[0]; cont = batch[1]; ans = batch[2]; cont_text = batch[3]; ans_text = batch[4]; quest_text=batch[5];
-            loss, starts, ends  = self.validate_on_batch(sess, quest, cont, ans)
-            running_loss +=loss
-            running_f1 += self.get_f1(ans, cont, starts, ends, ans_text)
+        return avg_loss, grad_norm, beg_prob, end_prob
 
-        avg_loss, avg_f1 = self.compute_and_report_epoch_stats(epoch, running_loss, running_f1, num_batches, 'val')
-        #self.write_val_summaries(sess, epoch, avg_loss, avg_f1)
-        return avg_loss, avg_f1
+
 
 
     def retrieve_prev_best_score(self):
@@ -749,11 +735,9 @@ class QASystem(object):
         print('')
         return best_score, epoch
 
-    def write_to_train_logs(self, f1, loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1, epoch_dur):
+    def write_to_train_logs(self, tr_loss, val_loss, val_f1, epoch_dur):
         with open(self.FLAGS.train_stats_file, 'a') as f:
-            max_beg_prob = np.mean(np.max(beg_prob, axis=1))
-            max_end_prob = np.mean(np.max(end_prob, axis=1))
-            f.write("{},{},{},{},{},{},{},{}, {}\n".format(f1, loss, grad_norm, avg_span, max_beg_prob, max_end_prob, val_f1, val_loss, epoch_dur))
+            f.write("{},{},{},{}\n".format(tr_loss, val_loss, val_f1, epoch_dur))
 
     def save_model(self, best_score, epoch, saver, sess):
         if saver:
@@ -798,7 +782,11 @@ class QASystem(object):
             print('==========')
             tic = time.time()
 
-            tr_loss, tr_f1, grad_norm, clip_value, beg_prob, end_prob, avg_span = self.run_epoch(sess, tr_set, epoch)
+            tr_loss, grad_norm, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
+            print('=========================')
+            toc = time.time()
+            epoch_dur = (toc - tic) / 60
+            logger.info("Epoch took {} minutes".format(epoch_dur))
 
             logger.info("Validating for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
             print('==========')
@@ -807,7 +795,7 @@ class QASystem(object):
             val_loss, val_f1 = self.validate(sess, val_set, epoch)
             toc = time.time()
             epoch_dur = (toc - tic) / 60
-            self.write_to_train_logs(tr_f1, tr_loss, grad_norm, avg_span, beg_prob, end_prob, val_loss, val_f1, epoch_dur)
+            self.write_to_train_logs(tr_loss, val_loss, val_f1, epoch_dur)
             logger.info("Epoch took {} minutes".format(epoch_dur))
 
             #logger.info("Epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
