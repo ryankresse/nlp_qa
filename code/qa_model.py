@@ -700,7 +700,7 @@ class QASystem(object):
             print('Batch {} of {}'.format(i+1, num_batches))
             sess.run(self.tr_inititializer, feed_dict={self.quest_data_placeholder: train_examples[0], self.cont_data_placeholder:train_examples[1], self.ans_data_placeholder:train_examples[2]})
 
-            if (i == 15): break #
+            if (i == 40): break #
             #if (i == num_batches - 1): break #
             loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged  = self.train_on_batch(sess)
             running_loss +=loss
