@@ -27,7 +27,7 @@ tf.app.flags.DEFINE_float("max_gradient_norm", 10.0, "Clip gradients to this nor
 tf.app.flags.DEFINE_float("dropout", 0.15, "Fraction of units randomly dropped on non-recurrent connections.")
 tf.app.flags.DEFINE_integer("batch_size", 32, "Batch size to use during training.")
 tf.app.flags.DEFINE_integer("epochs", 40, "Number of epochs to train.")
-tf.app.flags.DEFINE_integer("state_size", 200, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("state_size", 100, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("output_size", 750, "The output size of your model.")
 tf.app.flags.DEFINE_integer("embedding_size", 300, "Size of the pretrained vocabulary.")
 tf.app.flags.DEFINE_string("prev_best_score_file", "best_score.txt", "File where previous best score for model is stored")
@@ -45,10 +45,10 @@ tf.app.flags.DEFINE_integer("keep", 0, "How many checkpoints to keep, 0 indicate
 tf.app.flags.DEFINE_string("vocab_path", "data/squad/vocab.dat", "Path to vocab file (default: ./data/squad/vocab.dat)")
 tf.app.flags.DEFINE_string("embed_path", "", "Path to the trimmed GLoVe embedding (default: ./data/squad/glove.trimmed.{embedding_size}.npz)")
 tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to be the same length")
-tf.app.flags.DEFINE_integer("cont_length", 300, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
-tf.app.flags.DEFINE_integer("quest_length", 45, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("cont_length", 250, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
+tf.app.flags.DEFINE_integer("quest_length", 25, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("ans_length", 2, "The length of the answer")
-tf.app.flags.DEFINE_integer("num_perspectives", 10, "The number of matching perspectives")
+tf.app.flags.DEFINE_integer("num_perspectives", 20, "The number of matching perspectives")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -159,12 +159,10 @@ def main(_):
         json.dump(FLAGS.__flags, fout)
 
 
-
     with tf.Session() as sess:
         #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, FLAGS.train_dir)
         #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
-        pdb.set_trace()
         qa.train(sess, tr_set, val_set, FLAGS.train_dir)
 
         qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)

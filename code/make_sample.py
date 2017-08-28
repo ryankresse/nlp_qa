@@ -20,7 +20,7 @@ def readWriteLines(readPath, writePath, numLines):
     writeLines(writePath, toWrite)
 
 if __name__ == '__main__':
-    TRAIN_NUM = 1000
+    TRAIN_NUM = 10000
     VAL_NUM =  400
     PREPEND = ''
     data_path = os.path.join(os.getcwd(), 'data', 'squad')

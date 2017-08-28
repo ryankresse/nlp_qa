@@ -110,10 +110,10 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
-                #'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                #'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.cont_length, self.FLAGS.cont_length], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'full_att_weight': tf.get_variable('full_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 #'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
                 'max_att_weight': tf.get_variable('max_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
@@ -123,10 +123,10 @@ class QASystem(object):
     def add_biases(self):
         with tf.variable_scope('biases') as scope:
             self.biases = {
-                'beg_mpl_bias1': tf.get_variable('beg_mpl_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                #'beg_mpl_bias2': tf.get_variable('beg_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64),
-                'end_mpl_bias1': tf.get_variable('end_mpl_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                #'end_mpl_bias2': tf.get_variable('end_mpl_bias2', shape=[self.FLAGS.cont_length], dtype=tf.float64)
+                'beg_mlp_bias1': tf.get_variable('beg_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'beg_mlp_bias2': tf.get_variable('beg_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'end_mlp_bias1': tf.get_variable('end_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
+                'end_mlp_bias2': tf.get_variable('end_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64)
                 }
 
     def add_placeholders(self):
@@ -196,20 +196,19 @@ class QASystem(object):
         self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
         tf.summary.scalar('loss', self.loss)
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
-        tf.summary.scalar('grad norm', self.grad_norm)
+        #tf.summary.scalar('grad_norm', self.grad_norm)
 
         self.beg_prob = tf.nn.softmax(self.beg_logits)
         self.end_prob = tf.nn.softmax(self.end_logits)
-        tf.summary.histogram('beg_prob', self.beg_prob)
-        tf.summary.histogram('end_prob', self.end_prob)
+        #tf.summary.histogram('beg_prob', self.beg_prob)
+        #tf.summary.histogram('end_prob', self.end_prob)
 
         self.starts = self.get_pred(self.end_prob)
         self.ends = self.get_pred(self.end_prob)
 
         #self.add_weights_bias_summary()
 
-        tf.summary.histogram('ans_len', self.ends - self.starts)
-
+        #tf.summary.histogram('ans_len', self.ends - self.starts)
         self.merged = tf.summary.merge_all()
         self.summary_writer = tf.summary.FileWriter(self.FLAGS.summaries_dir)
         self.saver = tf.train.Saver()
@@ -365,38 +364,19 @@ class QASystem(object):
          return feed_dict
 
 
-    def get_quest_rep(self, quest_embed):
-        with tf.variable_scope('quest_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            output, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, quest_embed, sequence_length=self.quest_lens, dtype=tf.float64)
-            output_fw = tf.slice(output, [0, 0, 0], [-1, -1, self.FLAGS.state_size])
-            output_bw = tf.slice(output, [0, 0, self.FLAGS.state_size], [-1, -1,-1])
+    def input_lstm(self, quest_embed, quest_lens, filtered_cont, cont_lens):
+        with tf.variable_scope('input_lstm', initializer=tf.contrib.layers.xavier_initializer()) as scope:
+            fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
+            bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
 
-            last_ix = len(output_state_bw) - 1
-            bw_c = output_state_bw[last_ix].c
-            fw_c = output_state_fw[last_ix].c
-            bw_h = output_state_bw[last_ix].h
-            fw_h = output_state_fw[last_ix].h
+            (quest_output_fw, quest_output_bw), _= tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=quest_lens, dtype=tf.float64)
+            quest_last_fw = tf.slice(quest_output_fw, [0, self.FLAGS.cont_length-1, 0], [-1, 1, -1])
+            quest_last_bw = tf.slice(quest_output_bw, [0, 0, 0], [-1, 1, -1])
+            quest_last_hid = tf.concat([quest_last_fw, quest_last_bw], 2)
 
+            (cont_output_fw, cont_output_bw), _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, filtered_cont, sequence_length=cont_lens, dtype=tf.float64)
+            return quest_last_hid, quest_output_fw, quest_output_bw, cont_output_fw, cont_output_bw
 
-            last_hidden_state_tuple = tf.contrib.rnn.LSTMStateTuple(fw_c +  bw_c, fw_h + bw_h)
-            last_hidden_state = tf.concat([fw_h, bw_h], 1)
-            #return tf.concat(output, 2), last_hidden_state_tuple, last_hidden_state
-
-            return output_fw, output_bw, last_hidden_state_tuple, last_hidden_state
-            #return tf.concat([fw_output, bw_output], axis=2), tf.concat([fw_hidden_state, bw_hidden_state], axis=1)
-
-    def get_cont_rep(self, cont_embed, quest_hid_state):
-        with tf.variable_scope('cont_rep_rnn', initializer=tf.contrib.layers.xavier_initializer()) as scope:
-            bw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            fw_cells = [tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size) for i in range(3)]
-            init_states_bw = [quest_hid_state for i in range(3)]
-            init_states_fw = [quest_hid_state for i in range(3)]
-            output, output_state_fw, output_state_bw = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(fw_cells, bw_cells, cont_embed, initial_states_fw=init_states_fw,initial_states_bw=init_states_bw, sequence_length=self.cont_lens, dtype=tf.float64)
-            output_fw = tf.slice(output, [0, 0, 0], [-1, -1, self.FLAGS.state_size])
-            output_bw = tf.slice(output, [0, 0, self.FLAGS.state_size], [-1, -1,-1])
-        return output_fw, output_bw
 
     def aggregate(self, att_vecs):
         with tf.variable_scope('agg_lstm', initializer=tf.contrib.layers.xavier_initializer()) as scope:
@@ -404,7 +384,7 @@ class QASystem(object):
             bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             outputs, output_states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, att_vecs, sequence_length=self.cont_lens, dtype=tf.float64)
-	    return tf.concat([outputs[0], outputs[1]], 2) #(batch, cont, state*2)
+            return tf.concat([outputs[0], outputs[1]], 2) #(batch, cont, state*2)
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
@@ -424,8 +404,10 @@ class QASystem(object):
         with tf.variable_scope(scope_name) as scope:
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
-                out = tf.nn.relu(tf.matmul(ex, weights) + bias)
+                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, state*2) = (cont_length, state*2)
+                hid = tf.nn.relu(tf.matmul(ex, weights[0]) + bias[0]) # #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, 1) = (cont_length, 1)
+                out = tf.matmul(hid, weights[1]) + bias[1]  #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, 1) = (cont_length, 1)
+
                 logits.append(out) #(1, 300)
             return tf.squeeze(tf.stack(logits))
 
@@ -580,14 +562,14 @@ class QASystem(object):
 
         self.quest_embed, self.cont_embed = self.add_embeddings()
         self.filtered_cont = self.filter_cont(self.quest_embed, self.cont_embed)
-        self.quest_out_fw, self.quest_out_bw, self.quest_last_hid_tuple, self.quest_last_hid = self.get_quest_rep(self.quest_embed) #output(batch, max_time, hidden*2), last_hidden_state(batch, hidden*2)
 
-        self.cont_out_fw, self.cont_out_bw = self.get_cont_rep(self.filtered_cont, self.quest_last_hid_tuple)
+        self.quest_last_hid, self.quest_out_fw, self.quest_out_bw, self.cont_out_fw, self.cont_out_bw = self.input_lstm(self.quest_embed, self.quest_lens,  self.filtered_cont, self.cont_lens)
 
         self.att_vectors = self.calculate_att_vectors(self.quest_last_hid, self.quest_out_fw, self.quest_out_bw, self.cont_out_fw, self.cont_out_bw) # (batch, num_per*6, cont)
         self.aggregated = self.aggregate(self.att_vectors)
-        self.beg_logits = self.apply_mask(self.get_logits(self.aggregated, self.weights['beg_mlp_weight1'], self.biases['beg_mpl_bias1'], 'beg_logits')) #(state*2)
-        self.end_logits = self.apply_mask(self.get_logits(self.aggregated, self.weights['end_mlp_weight1'], self.biases['end_mpl_bias1'], 'end_logits'))
+
+        self.beg_logits = self.apply_mask(self.get_logits(self.aggregated, [self.weights['beg_mlp_weight1'], self.weights['beg_mlp_weight2']], [self.biases['beg_mlp_bias1'], self.biases['beg_mlp_bias2']], 'beg_logits')) #(state*2)
+        self.end_logits = self.apply_mask(self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits'))
         return self.beg_logits, self.end_logits
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
@@ -657,6 +639,8 @@ class QASystem(object):
         np.save(self.FLAGS.end_prob_file, end_prob)
 
     def train_on_batch(self, sess):
+        #logits = sess.run(self.beg_logits)
+        #pdb.set_trace()
         to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
         train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
         return loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged
@@ -678,8 +662,8 @@ class QASystem(object):
         all_ends = []
         for i in range(num_batches -1):
             print('Batch {} of {}'.format(i+1, num_batches))
-            if i == 2: break
-            #if (i == num_batches-1): break
+            #if i == 2: break
+            if (i == num_batches-1): break
             loss, ans, cont, starts, ends = self.validate_on_batch(sess)
             all_starts.append(starts)
             all_ends.append(ends)
@@ -687,7 +671,7 @@ class QASystem(object):
 
         all_starts = np.hstack(all_starts)
         all_ends = np.hstack(all_ends)
-        f1 = self.get_f1(self.val_set[1][:64, :], all_starts, all_ends, self.val_set[4][:64])
+        f1 = self.get_f1(self.val_set[1], all_starts, all_ends, self.val_set[4])
         avg_loss = running_loss / num_batches
         print('Epoch {} val loss: {:.2E}, f1: {}'.format(epoch, avg_loss, f1))
         print('=========================')
@@ -700,8 +684,8 @@ class QASystem(object):
             print('Batch {} of {}'.format(i+1, num_batches))
             sess.run(self.tr_inititializer, feed_dict={self.quest_data_placeholder: train_examples[0], self.cont_data_placeholder:train_examples[1], self.ans_data_placeholder:train_examples[2]})
 
-            if (i == 40): break #
-            #if (i == num_batches - 1): break #
+            #if (i == 40): break #
+            if (i == num_batches - 1): break #
             loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged  = self.train_on_batch(sess)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}'.format(loss, grad_norm))
