@@ -205,8 +205,8 @@ class QASystem(object):
 
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
 
-        self.beg_prob = tf.nn.softmax(self.beg_logits)
-        self.end_prob = tf.nn.softmax(self.end_logits)
+        #self.beg_prob = tf.nn.softmax(self.beg_logits)
+        #self.end_prob = tf.nn.softmax(self.end_logits)
 
         self.starts = self.get_pred(self.beg_prob)
         self.ends = self.get_pred(self.end_prob)
@@ -238,18 +238,33 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            self.mask = tf.not_equal(self.cont, tf.constant(self.FLAGS.pad_token, tf.int64))
+            self.beg_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=beg_labels, logits=beg_logits)
+            self.end_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=end_labels, logits=end_logits)
+            #example_sum_loss = tf.reduce_sum(beg_losses + end_losses, axis=1)
+            '''
+            self.loss_s =  tf.reduce_mean(self.beg_loss_s + self.end_loss_s)
 
-            self.beg_loss = tf.losses.log_loss(beg_labels, self.beg_prob, reduction='none')
-            self.end_loss = tf.losses.log_loss(end_labels, self.end_prob, reduction='none')
-            #self.beg_loss = tf.boolean_mask(self.beg_loss, self.mask)
-            #self.end_loss = tf.boolean_mask(self.end_loss, self.mask)
-            self.beg_loss = self.beg_loss * tf.cast(self.mask, tf.float32)
-            self.end_loss = self.end_loss * tf.cast(self.mask, tf.float32)
+            self.beg_loss_un_me = tf.log(self.beg_prob) * tf.cast(beg_labels, tf.float64)
+            self.end_loss_un_me = tf.log(self.end_prob) * tf.cast(end_labels, tf.float64)
+            self.beg_loss_me = self.beg_loss_un_me * tf.cast(self.mask, tf.float64)
+            self.end_loss_me = self.end_loss_un_me * tf.cast(self.mask, tf.float64)
+
+            self.beg_reduced_me = tf.reduce_sum(self.beg_loss_me, axis=1)
+            self.end_reduced_me = tf.reduce_sum(self.end_loss_me, axis=1)
+            self.loss_me = tf.reduce_mean(self.beg_reduced_me + self.end_reduced_me)
+
+
+
+
+            self.beg_loss_un = tf.losses.log_loss(beg_labels, self.beg_prob, reduction='none')
+            self.end_loss_un = tf.losses.log_loss(end_labels, self.end_prob, reduction='none')
+            self.beg_loss = self.beg_loss_un * tf.cast(self.mask, tf.float32)
+            self.end_loss = self.end_loss_un * tf.cast(self.mask, tf.float32)
 
             self.beg_reduced = tf.reduce_sum(self.beg_loss, axis=1)
             self.end_reduced = tf.reduce_sum(self.end_loss, axis=1)
-            return tf.reduce_mean(self.beg_reduced + self.end_reduced)
+            '''
+            return tf.reduce_mean(self.beg_loss + self.end_loss)
 
 
     def add_embeddings(self):
@@ -564,8 +579,7 @@ class QASystem(object):
         labels = self.clip_labels(labels)
         beg_labels = tf.squeeze(tf.slice(labels, [0, 0], [-1,1]))
         end_labels = tf.squeeze(tf.slice(labels, [0, 1], [-1,1]))
-
-        return tf.one_hot(beg_labels, depth=self.FLAGS.cont_length, dtype=tf.int64), tf.one_hot(end_labels, depth=self.FLAGS.cont_length, dtype=tf.int64)
+        return beg_labels, end_labels
 
     def add_prediction_op(self):
 
@@ -656,8 +670,7 @@ class QASystem(object):
         np.save(self.FLAGS.end_prob_file, end_prob)
 
     def train_on_batch(self, sess):
-        #t, ranges, bools, neg_infs, logits,  end_loss = sess.run([self.start_tiled, self.ranges, self.bools, self.neg_infs, self.end_logits, self.end_loss])
-        #ans, loss, beg_loss, end_loss, mask, c_lens = sess.run([self.ans, self.loss, self.beg_loss, self.end_loss, self.mask, self.cont_lens])
+        #loss_s, beg_un, loss, loss_me, beg_loss, end_loss, mask, c_lens = sess.run([self.loss_s, self.beg_loss_un, self.loss, self.loss_me, self.beg_loss, self.end_loss, self.mask, self.cont_lens])
         #pdb.set_trace()
         to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
         train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)

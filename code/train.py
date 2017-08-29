@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to 
 tf.app.flags.DEFINE_integer("cont_length", 250, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("quest_length", 25, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("ans_length", 2, "The length of the answer")
-tf.app.flags.DEFINE_integer("num_perspectives", 30, "The number of matching perspectives")
+tf.app.flags.DEFINE_integer("num_perspectives", 50, "The number of matching perspectives")
 
 
 FLAGS = tf.app.flags.FLAGS
@@ -124,7 +124,7 @@ def test_device_placement():
 def main(_):
     test_device_placement()
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
-    prepend = ''  if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
+    prepend = ''  #if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
 
 
     print('Reading data')
