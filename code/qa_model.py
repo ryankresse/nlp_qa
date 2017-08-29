@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import time
 import logging
+import math
 
 import numpy as np
 from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -182,28 +183,32 @@ class QASystem(object):
         :return:
         """
 
-        '''
-        self.tr_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
-        self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set[0].shape[0])
-        self.tr_dataset = self.tr_dataset.batch(self.FLAGS.batch_size)
-        self.iterator =self.tr_dataset.make_initializable_iterator()
-        '''
         self.create_datasets()
         self.lr = self.FLAGS.learning_rate
         self.beg_logits, self.end_logits = self.add_prediction_op()
 
         self.beg_labels, self.end_labels = self.get_labels(self.ans)
+
+        '''
+        self.start_pos = tf.argmax(self.beg_logits, 1)
+        self.start_tiled = tf.tile(tf.expand_dims(self.start_pos, 1), [1, self.FLAGS.cont_length]) # (batch, cont) -- index of start position repeated for each example
+        self.idx_mask = tf.cast(tf.expand_dims(tf.range(self.FLAGS.cont_length), 0), tf.int64)
+        self.ranges = tf.tile(self.idx_mask, [self.FLAGS.batch_size, 1]) # (batch, cont) -- ranges 0-cont_length
+        self.bools = self.ranges < self.start_tiled #bools, any cont_position before the predicted started position is set to true
+        self.neg_infs = tf.ones(self.end_logits.shape, tf.float64) * tf.constant(-1.0*np.inf, tf.float64)
+        #self.end_logits = tf.where(self.bools, self.neg_infs, self.end_logits)
+        '''
+        self.beg_prob = tf.nn.softmax(self.beg_logits)
+        self.end_prob = tf.nn.softmax(self.end_logits)
         self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
         tf.summary.scalar('loss', self.loss)
+
         self.train_op, self.grad_norm = self.add_train_op(self.loss)
-        #tf.summary.scalar('grad_norm', self.grad_norm)
 
         self.beg_prob = tf.nn.softmax(self.beg_logits)
         self.end_prob = tf.nn.softmax(self.end_logits)
-        #tf.summary.histogram('beg_prob', self.beg_prob)
-        #tf.summary.histogram('end_prob', self.end_prob)
 
-        self.starts = self.get_pred(self.end_prob)
+        self.starts = self.get_pred(self.beg_prob)
         self.ends = self.get_pred(self.end_prob)
 
         #self.add_weights_bias_summary()
@@ -216,10 +221,12 @@ class QASystem(object):
     def apply_mask(self, items):
         items_flat = tf.reshape(items, [-1])
         cont_flat = tf.reshape(self.cont, [-1])
-        mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
+        self.mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
+
+        #neg_infs = tf.ones(items_flat.shape, tf.float64) * tf.constant(-1.0*np.inf, tf.float64)
         masked_items = items_flat * mask
         masked_items = tf.reshape(masked_items, tf.shape(items))
-        return masked_items
+        return masked_items, mask
 
     def clip_labels(self, labels):
         return tf.clip_by_value(labels, 0, self.FLAGS.cont_length-1)
@@ -231,12 +238,18 @@ class QASystem(object):
         :return:
         """
         with vs.variable_scope("loss"):
-            #beg_logits = self.mask_logits(beg_logits)
-            #end_logits = self.mask_logits(end_logits)
-            self.beg_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=beg_labels, logits=beg_logits)
-            self.end_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=end_labels, logits=end_logits)
-            #example_sum_loss = tf.reduce_sum(beg_losses + end_losses, axis=1)
-            return tf.reduce_mean(self.beg_loss + self.end_loss)
+            self.mask = tf.not_equal(self.cont, tf.constant(self.FLAGS.pad_token, tf.int64))
+
+            self.beg_loss = tf.losses.log_loss(beg_labels, self.beg_prob, reduction='none')
+            self.end_loss = tf.losses.log_loss(end_labels, self.end_prob, reduction='none')
+            #self.beg_loss = tf.boolean_mask(self.beg_loss, self.mask)
+            #self.end_loss = tf.boolean_mask(self.end_loss, self.mask)
+            self.beg_loss = self.beg_loss * tf.cast(self.mask, tf.float32)
+            self.end_loss = self.end_loss * tf.cast(self.mask, tf.float32)
+
+            self.beg_reduced = tf.reduce_sum(self.beg_loss, axis=1)
+            self.end_reduced = tf.reduce_sum(self.end_loss, axis=1)
+            return tf.reduce_mean(self.beg_reduced + self.end_reduced)
 
 
     def add_embeddings(self):
@@ -549,12 +562,12 @@ class QASystem(object):
 
     def get_labels(self, labels):
         labels = self.clip_labels(labels)
-        beg_labels = tf.slice(labels, [0, 0], [-1,1])
-        end_labels = tf.slice(labels, [0, 1], [-1,1])
-        return tf.squeeze(beg_labels), tf.squeeze(end_labels)
+        beg_labels = tf.squeeze(tf.slice(labels, [0, 0], [-1,1]))
+        end_labels = tf.squeeze(tf.slice(labels, [0, 1], [-1,1]))
+
+        return tf.one_hot(beg_labels, depth=self.FLAGS.cont_length, dtype=tf.int64), tf.one_hot(end_labels, depth=self.FLAGS.cont_length, dtype=tf.int64)
 
     def add_prediction_op(self):
-
 
         self.quest, self.cont, self.ans = self.iterator.get_next()
 
@@ -568,8 +581,12 @@ class QASystem(object):
         self.att_vectors = self.calculate_att_vectors(self.quest_last_hid, self.quest_out_fw, self.quest_out_bw, self.cont_out_fw, self.cont_out_bw) # (batch, num_per*6, cont)
         self.aggregated = self.aggregate(self.att_vectors)
 
-        self.beg_logits = self.apply_mask(self.get_logits(self.aggregated, [self.weights['beg_mlp_weight1'], self.weights['beg_mlp_weight2']], [self.biases['beg_mlp_bias1'], self.biases['beg_mlp_bias2']], 'beg_logits')) #(state*2)
-        self.end_logits = self.apply_mask(self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits'))
+        self.beg_logits = self.get_logits(self.aggregated, [self.weights['beg_mlp_weight1'], self.weights['beg_mlp_weight2']], [self.biases['beg_mlp_bias1'], self.biases['beg_mlp_bias2']], 'beg_logits') #(state*2)
+        self.end_logits = self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits')
+
+
+        #self.beg_logits, _ = self.apply_mask(self.get_logits(self.aggregated, [self.weights['beg_mlp_weight1'], self.weights['beg_mlp_weight2']], [self.biases['beg_mlp_bias1'], self.biases['beg_mlp_bias2']], 'beg_logits')) #(state*2)
+        #self.end_logits, self.end_mask = self.apply_mask(self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits'))
         return self.beg_logits, self.end_logits
 
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
@@ -639,7 +656,8 @@ class QASystem(object):
         np.save(self.FLAGS.end_prob_file, end_prob)
 
     def train_on_batch(self, sess):
-        #logits = sess.run(self.beg_logits)
+        #t, ranges, bools, neg_infs, logits,  end_loss = sess.run([self.start_tiled, self.ranges, self.bools, self.neg_infs, self.end_logits, self.end_loss])
+        #ans, loss, beg_loss, end_loss, mask, c_lens = sess.run([self.ans, self.loss, self.beg_loss, self.end_loss, self.mask, self.cont_lens])
         #pdb.set_trace()
         to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
         train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
