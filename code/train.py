@@ -147,7 +147,10 @@ def main(_):
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
     decoder = Decoder(output_size=FLAGS.output_size)
 
-    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, tr_set, val_set)
+    del vocab
+    del rev_vocab
+    
+    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, tr_set[0].shape[0])
 
     if not os.path.exists(FLAGS.log_dir):
         os.makedirs(FLAGS.log_dir)

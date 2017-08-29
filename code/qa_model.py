@@ -84,10 +84,9 @@ class QASystem(object):
         self.FLAGS = args[0]
         embed_path = args[1]
         self.idx_word = args[2]
-        self.tr_set = args[3]
-        self.val_set = args[4]
+        self.tr_set_size = args[3]
 
-        self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove']
+        self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove'].astype(np.float32)
         self.isTest = False
         # ==== set up placeholder tokens ========
         self.cont_placeholer = None
@@ -111,23 +110,23 @@ class QASystem(object):
         #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
-                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float64,initializer=tf.contrib.layers.xavier_initializer()),
-                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'full_att_weight': tf.get_variable('full_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                #'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'max_att_weight': tf.get_variable('max_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
-                'mean_att_weight': tf.get_variable('mean_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float64, initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight1': tf.get_variable('end_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer()),
+                'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
+                'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
+                'full_att_weight': tf.get_variable('full_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
+                #'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
+                'max_att_weight': tf.get_variable('max_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
+                'mean_att_weight': tf.get_variable('mean_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
                 }
 
     def add_biases(self):
         with tf.variable_scope('biases') as scope:
             self.biases = {
-                'beg_mlp_bias1': tf.get_variable('beg_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                'beg_mlp_bias2': tf.get_variable('beg_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                'end_mlp_bias1': tf.get_variable('end_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64),
-                'end_mlp_bias2': tf.get_variable('end_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float64)
+                'beg_mlp_bias1': tf.get_variable('beg_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32),
+                'beg_mlp_bias2': tf.get_variable('beg_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32),
+                'end_mlp_bias1': tf.get_variable('end_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32),
+                'end_mlp_bias2': tf.get_variable('end_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32)
                 }
 
     def add_placeholders(self):
@@ -143,16 +142,16 @@ class QASystem(object):
           self.ans_placeholder: (None, 2)
           dropout_placeholder: (scalar)
        """
-        self.quest_placeholder = tf.placeholder(tf.int64, shape=(None, self.FLAGS.quest_length))
-        self.cont_placeholder = tf.placeholder(tf.int64, shape=(None, self.FLAGS.cont_length))
+        self.quest_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.quest_length))
+        self.cont_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.cont_length))
         self.ans_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
         self.dropout_placeholder = tf.placeholder(tf.float32, shape=(None))
 
 
     def create_datasets(self):
 
-        self.quest_data_placeholder =  tf.placeholder(tf.int64, shape=(None, self.FLAGS.quest_length))
-        self.cont_data_placeholder = tf.placeholder(tf.int64, shape=(None, self.FLAGS.cont_length))
+        self.quest_data_placeholder =  tf.placeholder(tf.int32, shape=(None, self.FLAGS.quest_length))
+        self.cont_data_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.cont_length))
         self.ans_data_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
 
         '''
@@ -162,13 +161,14 @@ class QASystem(object):
         '''
 
         self.tr_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
-        self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set[0].shape[0])
+        self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set_size)
         self.tr_dataset = self.tr_dataset.batch(self.FLAGS.batch_size)
 
         self.val_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
         self.val_dataset = self.val_dataset.batch(self.FLAGS.batch_size)
+
         shapes = (tf.TensorShape([None, self.FLAGS.quest_length]), tf.TensorShape([None, self.FLAGS.cont_length]), tf.TensorShape([None, self.FLAGS.ans_length]))
-        self.iterator = tf.contrib.data.Iterator.from_structure((tf.int64, tf.int64, tf.int32), shapes)
+        self.iterator = tf.contrib.data.Iterator.from_structure((tf.int32, tf.int32, tf.int32), shapes)
         self.tr_inititializer = self.iterator.make_initializer(self.tr_dataset)
         self.val_inititializer = self.iterator.make_initializer(self.val_dataset)
 
@@ -185,6 +185,7 @@ class QASystem(object):
 
         self.create_datasets()
         self.lr = self.FLAGS.learning_rate
+
         self.beg_logits, self.end_logits = self.add_prediction_op()
 
         self.beg_labels, self.end_labels = self.get_labels(self.ans)
@@ -192,12 +193,13 @@ class QASystem(object):
         '''
         self.start_pos = tf.argmax(self.beg_logits, 1)
         self.start_tiled = tf.tile(tf.expand_dims(self.start_pos, 1), [1, self.FLAGS.cont_length]) # (batch, cont) -- index of start position repeated for each example
-        self.idx_mask = tf.cast(tf.expand_dims(tf.range(self.FLAGS.cont_length), 0), tf.int64)
+        self.idx_mask = tf.cast(tf.expand_dims(tf.range(self.FLAGS.cont_length), 0), tf.int32)
         self.ranges = tf.tile(self.idx_mask, [self.FLAGS.batch_size, 1]) # (batch, cont) -- ranges 0-cont_length
         self.bools = self.ranges < self.start_tiled #bools, any cont_position before the predicted started position is set to true
-        self.neg_infs = tf.ones(self.end_logits.shape, tf.float64) * tf.constant(-1.0*np.inf, tf.float64)
+        self.neg_infs = tf.ones(self.end_logits.shape, tf.float32) * tf.constant(-1.0*np.inf, tf.float32)
         #self.end_logits = tf.where(self.bools, self.neg_infs, self.end_logits)
         '''
+
         self.beg_prob = tf.nn.softmax(self.beg_logits)
         self.end_prob = tf.nn.softmax(self.end_logits)
         self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
@@ -221,9 +223,9 @@ class QASystem(object):
     def apply_mask(self, items):
         items_flat = tf.reshape(items, [-1])
         cont_flat = tf.reshape(self.cont, [-1])
-        self.mask = tf.sign(tf.cast(cont_flat, dtype=tf.float64))
+        self.mask = tf.sign(tf.cast(cont_flat, dtype=tf.float32))
 
-        #neg_infs = tf.ones(items_flat.shape, tf.float64) * tf.constant(-1.0*np.inf, tf.float64)
+        #neg_infs = tf.ones(items_flat.shape, tf.float32) * tf.constant(-1.0*np.inf, tf.float32)
         masked_items = items_flat * mask
         masked_items = tf.reshape(masked_items, tf.shape(items))
         return masked_items, mask
@@ -244,10 +246,10 @@ class QASystem(object):
             '''
             self.loss_s =  tf.reduce_mean(self.beg_loss_s + self.end_loss_s)
 
-            self.beg_loss_un_me = tf.log(self.beg_prob) * tf.cast(beg_labels, tf.float64)
-            self.end_loss_un_me = tf.log(self.end_prob) * tf.cast(end_labels, tf.float64)
-            self.beg_loss_me = self.beg_loss_un_me * tf.cast(self.mask, tf.float64)
-            self.end_loss_me = self.end_loss_un_me * tf.cast(self.mask, tf.float64)
+            self.beg_loss_un_me = tf.log(self.beg_prob) * tf.cast(beg_labels, tf.float32)
+            self.end_loss_un_me = tf.log(self.end_prob) * tf.cast(end_labels, tf.float32)
+            self.beg_loss_me = self.beg_loss_un_me * tf.cast(self.mask, tf.float32)
+            self.end_loss_me = self.end_loss_un_me * tf.cast(self.mask, tf.float32)
 
             self.beg_reduced_me = tf.reduce_sum(self.beg_loss_me, axis=1)
             self.end_reduced_me = tf.reduce_sum(self.end_loss_me, axis=1)
@@ -281,7 +283,7 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.lr)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float64) #tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float64), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float64))
+        self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float32) #tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float32), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float32))
 
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
 
@@ -397,12 +399,12 @@ class QASystem(object):
             fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
 
-            (quest_output_fw, quest_output_bw), _= tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=quest_lens, dtype=tf.float64)
+            (quest_output_fw, quest_output_bw), _= tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, quest_embed, sequence_length=quest_lens, dtype=tf.float32)
             quest_last_fw = tf.slice(quest_output_fw, [0, self.FLAGS.cont_length-1, 0], [-1, 1, -1])
             quest_last_bw = tf.slice(quest_output_bw, [0, 0, 0], [-1, 1, -1])
             quest_last_hid = tf.concat([quest_last_fw, quest_last_bw], 2)
 
-            (cont_output_fw, cont_output_bw), _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, filtered_cont, sequence_length=cont_lens, dtype=tf.float64)
+            (cont_output_fw, cont_output_bw), _ = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, filtered_cont, sequence_length=cont_lens, dtype=tf.float32)
             return quest_last_hid, quest_output_fw, quest_output_bw, cont_output_fw, cont_output_bw
 
 
@@ -411,19 +413,19 @@ class QASystem(object):
             att_vecs = tf.transpose(att_vecs, [0, 2, 1]) #(batch, cont, num_per*6)
             bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
-            outputs, output_states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, att_vecs, sequence_length=self.cont_lens, dtype=tf.float64)
+            outputs, output_states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, att_vecs, sequence_length=self.cont_lens, dtype=tf.float32)
             return tf.concat([outputs[0], outputs[1]], 2) #(batch, cont, state*2)
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
             cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
-            beg_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
+            beg_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float32, sequence_length=self.cont_lens)
             return beg_lstm_output
 
     def end_lstm(self, cont_scaled):
         with tf.variable_scope('end_lstm') as scope:
             cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size*2)
-            end_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float64, sequence_length=self.cont_lens)
+            end_lstm_output, hidden_state = tf.nn.dynamic_rnn(cell, cont_scaled, dtype=tf.float32, sequence_length=self.cont_lens)
             return end_lstm_output
 
 
@@ -603,6 +605,7 @@ class QASystem(object):
         #self.end_logits, self.end_mask = self.apply_mask(self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits'))
         return self.beg_logits, self.end_logits
 
+
     def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
         feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
         quest_last_hid, cont_out = sess.run([self.self.quest_last_hid, self.cont_out], feed_dict=feed)
@@ -670,7 +673,7 @@ class QASystem(object):
         np.save(self.FLAGS.end_prob_file, end_prob)
 
     def train_on_batch(self, sess):
-        #loss_s, beg_un, loss, loss_me, beg_loss, end_loss, mask, c_lens = sess.run([self.loss_s, self.beg_loss_un, self.loss, self.loss_me, self.beg_loss, self.end_loss, self.mask, self.cont_lens])
+        #contembed, questembed= sess.run([self.cont_embed, self.quest_embed])
         #pdb.set_trace()
         to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
         train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
@@ -702,7 +705,7 @@ class QASystem(object):
 
         all_starts = np.hstack(all_starts)
         all_ends = np.hstack(all_ends)
-        f1 = self.get_f1(self.val_set[1], all_starts, all_ends, self.val_set[4])
+        f1 = self.get_f1(val_set[1], all_starts, all_ends, val_set[4])
         avg_loss = running_loss / num_batches
         print('Epoch {} val loss: {:.2E}, f1: {}'.format(epoch, avg_loss, f1))
         print('=========================')
