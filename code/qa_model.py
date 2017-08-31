@@ -817,11 +817,25 @@ class QASystem(object):
             logger.info("Epoch took {} minutes".format(epoch_dur))
 
             #logger.info("Epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
-
-            if tr_loss < best_score:
-                best_score = tr_loss
+            
+            if val_loss < best_score:
+                best_score = val_loss
                 num_since_improve = 0
                 self.save_model(best_score, epoch_num, saver, sess)
+
+            else:
+                num_since_improve +=1
+                if num_since_improve == 3:
+                    print('Model has not improved in {} epochs. Stopping now. Bye bye.'.format(num_since_improve))
+                    break
+                self.lr *= .10
+                print('Validation loss did not improve. Decreasing learning rate to {:.2E}'.format(self.lr))
+
+            if tr_loss < best_score:
+                pass
+		#best_score = tr_loss
+                #num_since_improve = 0
+                #self.save_model(best_score, epoch_num, saver, sess)
             else:
                 pass
                 #self.lr, num_since_improve = self.maybe_change_lr(best_score, num_since_improve)

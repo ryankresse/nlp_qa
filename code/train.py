@@ -15,7 +15,7 @@ import shutil
 import logging
 
 logging.basicConfig(level=logging.INFO)
-MODEL_NAME= 'mult_per_match_32'
+MODEL_NAME= 'multi_35'
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_integer("pad_token", 0, "Token be used when padding data to 
 tf.app.flags.DEFINE_integer("cont_length", 250, "The length the context should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("quest_length", 25, "The length the question should be padded or clipped to so that the model receives inputs of uniform length")
 tf.app.flags.DEFINE_integer("ans_length", 2, "The length of the answer")
-tf.app.flags.DEFINE_integer("num_perspectives", 30, "The number of matching perspectives")
+tf.app.flags.DEFINE_integer("num_perspectives", 35, "The number of matching perspectives")
 
 
 FLAGS = tf.app.flags.FLAGS
