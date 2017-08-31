@@ -122,53 +122,123 @@ def test_device_placement():
         print(test_sess.run(test_mat_mul))
 
 def main(_):
+
     test_device_placement()
+
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
-    prepend = '' #  if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
+
+    #prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
+
+    prepend = '' #FLAGS.sample_data_prepend
+
+    val_only = True if len(sys.argv) > 1 and sys.argv[1] == 'val_only' else False
+
 
 
     print('Reading data')
+
     print('==================')
 
-    tr_set = fetch_data_set(prepend, 'train')
+
+
     val_set = fetch_data_set(prepend, 'val')
+
+    if val_only:
+
+        tr_set_size = 0
+
+    else:
+
+        tr_set = fetch_data_set(prepend, 'train')
+
+        tr_set_size = tr_set[0].shape[0]
+
     print('Finished reading data')
+
     print('==================')
+
+
+
 
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
+
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
 
+
+
     #vocab is map from words to indices, rev_vocab is our list of words in reverse frequency order
+
     vocab, rev_vocab = initialize_vocab(vocab_path)
+
+
 
     idx_word = data_utils.invert_map(vocab)
 
+
+
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
+
     decoder = Decoder(output_size=FLAGS.output_size)
 
+
+
     del vocab
+
     del rev_vocab
-    
-    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, tr_set[0].shape[0])
+
+    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, val_only, tr_set_size)
+
+
+
+
 
     if not os.path.exists(FLAGS.log_dir):
+
         os.makedirs(FLAGS.log_dir)
+
     file_handler = logging.FileHandler(pjoin(FLAGS.log_dir, "log.txt"))
+
     logging.getLogger().addHandler(file_handler)
 
+
+
     #print(vars(FLAGS))
+
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
+
         json.dump(FLAGS.__flags, fout)
 
 
-    with tf.Session() as sess:
-        #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
-        initialize_model(sess, qa, FLAGS.train_dir)
-        #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
-        qa.train(sess, tr_set, val_set, FLAGS.train_dir)
 
-        qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
+
+
+    with tf.Session() as sess:
+
+        #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
+
+        initialize_model(sess, qa, FLAGS.train_dir)
+
+        #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
+
+        if val_only:
+
+            print('Running validation only')
+
+            qa.validate(sess, val_set, 'validation')
+
+        else:
+
+            qa.train(sess, tr_set, val_set, FLAGS.train_dir)
+
+
+
+        #qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
+
+
 
 if __name__ == "__main__":
+
     tf.app.run()
+
+

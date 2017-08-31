@@ -74,37 +74,62 @@ class Decoder(object):
 
 class QASystem(object):
     def __init__(self, encoder, decoder, *args):
+
         """
+
         Initializes your System
 
+
+
         :param encoder: an encoder that you constructed in train.py
+
         :param decoder: a decoder that you constructed in train.py
+
         :param args: pass in more arguments as needed
+
         """
+
         self.FLAGS = args[0]
+
         embed_path = args[1]
+
         self.idx_word = args[2]
-        self.tr_set_size = args[3]
+
+        self.val_only = args[3]
+
+        self.tr_set_size = args[4]
+
+
 
         self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove'].astype(np.float32)
+
         self.isTest = False
+
         # ==== set up placeholder tokens ========
+
         self.cont_placeholer = None
+
         self.quest_placeholder = None
+
         self.ans_placeholder = None
+
         self.dropout_placeholder = None
 
 
+
+
+
         #self.add_placeholders()
+
         # ==== assemble pieces ====
+
         with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
+
             self.add_weights()
+
             self.add_biases()
+
             self.setup_system()
-
-            #self.setup_loss()
-        # ==== set up training/updating procedure ====
-
 
     def add_weights(self):
         #out is (batch, quest_length, hidden_size*2)
@@ -150,30 +175,57 @@ class QASystem(object):
 
     def create_datasets(self):
 
+
+
         self.quest_data_placeholder =  tf.placeholder(tf.int32, shape=(None, self.FLAGS.quest_length))
+
         self.cont_data_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.cont_length))
+
         self.ans_data_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
 
+
+
         '''
+
         self.quest_text_placeholder =  tf.placeholder(tf.string, shape=(None))
+
         self.cont_text_placeholder = tf.placeholder(tf.string, shape=(None))
+
         self.ans_text_placeholder = tf.placeholder(tf.string, shape=(None))
+
         '''
-
-        self.tr_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
-        self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set_size)
-        self.tr_dataset = self.tr_dataset.batch(self.FLAGS.batch_size)
-
-        self.val_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
-        self.val_dataset = self.val_dataset.batch(self.FLAGS.batch_size)
 
         shapes = (tf.TensorShape([None, self.FLAGS.quest_length]), tf.TensorShape([None, self.FLAGS.cont_length]), tf.TensorShape([None, self.FLAGS.ans_length]))
+
         self.iterator = tf.contrib.data.Iterator.from_structure((tf.int32, tf.int32, tf.int32), shapes)
-        self.tr_inititializer = self.iterator.make_initializer(self.tr_dataset)
+
+
+
+        if not self.val_only:
+
+            self.tr_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
+
+            self.tr_dataset = self.tr_dataset.shuffle(buffer_size=self.tr_set_size)
+
+            self.tr_dataset = self.tr_dataset.batch(self.FLAGS.batch_size)
+
+            self.tr_inititializer = self.iterator.make_initializer(self.tr_dataset)
+
+
+
+
+
+        self.val_dataset = tf.contrib.data.Dataset.from_tensor_slices((self.quest_data_placeholder, self.cont_data_placeholder, self.ans_data_placeholder))
+
+        self.val_dataset = self.val_dataset.batch(self.FLAGS.batch_size)
+
+
+
         self.val_inititializer = self.iterator.make_initializer(self.val_dataset)
 
-        #self.val_iterator =self.val_dataset.make_initializable_iterator()
 
+
+        #self.val_iterator =self.val_dataset.make_initializable_iterator()
 
     def setup_system(self):
         """
@@ -211,7 +263,9 @@ class QASystem(object):
         #self.end_prob = tf.nn.softmax(self.end_logits)
 
         self.starts = self.get_pred(self.beg_prob)
-        self.ends = self.get_pred(self.end_prob)
+        self.ends = self.get_end_pred(self.end_prob, self.starts)
+
+	# self.ends = self.get_pred(self.end_prob)
 
         #self.add_weights_bias_summary()
 
@@ -614,7 +668,16 @@ class QASystem(object):
 
     def get_pred(self, probs):
         return tf.argmax(probs, axis=1)
+    
+    def get_end_pred(self, probs, start_pos):
 
+        self.ranges = tf.cast(tf.tile(tf.expand_dims(tf.range(self.FLAGS.cont_length), 0), [self.FLAGS.batch_size,1]), tf.int64)
+
+        self.pred_mask = tf.less(self.ranges, tf.expand_dims(start_pos, 1))
+
+        self.masked_probs = tf.where(self.pred_mask, tf.zeros((self.FLAGS.batch_size, self.FLAGS.cont_length)), probs)
+        return tf.argmax(self.masked_probs, axis=1)
+    
     def evaluate_performance(self, pred_ans_words, ans_text):
         f1 =  get_f1_score(pred_ans_words, ans_text.tolist())
         return f1
