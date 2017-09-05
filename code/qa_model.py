@@ -196,36 +196,17 @@ class QASystem(object):
 
         self.beg_logits, self.end_logits = self.add_prediction_op()
 
-        self.beg_labels, self.end_labels = self.get_labels(self.ans)
-
-        '''
-        self.start_pos = tf.argmax(self.beg_logits, 1)
-        self.start_tiled = tf.tile(tf.expand_dims(self.start_pos, 1), [1, self.FLAGS.cont_length]) # (batch, cont) -- index of start position repeated for each example
-        self.idx_mask = tf.cast(tf.expand_dims(tf.range(self.FLAGS.cont_length), 0), tf.int32)
-        self.ranges = tf.tile(self.idx_mask, [self.FLAGS.batch_size, 1]) # (batch, cont) -- ranges 0-cont_length
-        self.bools = self.ranges < self.start_tiled #bools, any cont_position before the predicted started position is set to true
-        self.neg_infs = tf.ones(self.end_logits.shape, tf.float32) * tf.constant(-1.0*np.inf, tf.float32)
-        #self.end_logits = tf.where(self.bools, self.neg_infs, self.end_logits)
-        '''
-
         self.beg_prob = tf.nn.softmax(self.beg_logits)
         self.end_prob = tf.nn.softmax(self.end_logits)
-        self.loss = self.get_loss(self.beg_logits, self.end_logits, self.beg_labels, self.end_labels)
-        tf.summary.scalar('loss', self.loss)
-
-        self.train_op, self.grad_norm = self.add_train_op(self.loss)
-
-        #self.beg_prob = tf.nn.softmax(self.beg_logits)
-        #self.end_prob = tf.nn.softmax(self.end_logits)
-
         self.starts = self.get_pred(self.beg_prob)
         self.ends = self.get_end_pred(self.end_prob, self.starts)
 
-	# self.ends = self.get_pred(self.end_prob)
+        if not self.is_test:
+            self.loss = self.get_loss(self.beg_logits, self.end_logits)
+            tf.summary.scalar('loss', self.loss)
+            self.train_op, self.grad_norm = self.add_train_op(self.loss)
 
-        #self.add_weights_bias_summary()
 
-        #tf.summary.histogram('ans_len', self.ends - self.starts)
         self.merged = tf.summary.merge_all()
         self.summary_writer = tf.summary.FileWriter(self.FLAGS.summaries_dir)
         self.saver = tf.train.Saver()
@@ -595,7 +576,10 @@ class QASystem(object):
 
     def add_prediction_op(self):
 
-        self.quest, self.cont, self.ans = self.iterator.get_next()
+        if not self.is_test:
+            self.quest, self.cont, self.ans = self.iterator.get_next()
+        else:
+            self.quest, self.cont = self.iterator.get_next()
 
         self.quest_lens, self.cont_lens = self.get_lens()
 
@@ -729,6 +713,37 @@ class QASystem(object):
         print('Epoch {} val loss: {:.2E}, f1: {}'.format(epoch, avg_loss, f1))
         print('=========================')
         return avg_loss, f1
+
+    def test_on_batch(self, sess):
+        #quest, cont, ql, cl  =  sess.run([self.quest, self.cont, self.quest_lens, self.cont_lens])
+        #pdb.set_trace()
+        starts, ends  =  sess.run([self.starts, self.ends])
+        return starts, ends
+
+    def test(self, sess, test_set):
+        num_batches = int(len(test_set[0]) / self.FLAGS.batch_size)
+        feed_dict= {
+            self.quest_data_placeholder: test_set[1],
+            self.cont_data_placeholder:test_set[0],
+        }
+        sess.run(self.test_inititializer, feed_dict=feed_dict)
+        all_starts = []
+        all_ends = []
+        for i in range(num_batches):
+            print('Batch {} of {}'.format(i+1, num_batches))
+            #if i == 2: break
+            #if (i == num_batches-1): break
+            starts, ends = self.test_on_batch(sess)
+            all_starts.append(starts)
+            all_ends.append(ends)
+
+
+        all_starts = np.hstack(all_starts)
+        all_ends = np.hstack(all_ends)
+        return all_starts, all_ends
+
+
+
 
     def run_epoch(self, sess, train_examples, epoch):
         num_batches = int(len(train_examples[0]) / self.FLAGS.batch_size)
