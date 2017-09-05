@@ -225,38 +225,15 @@ class QASystem(object):
         return tf.clip_by_value(labels, 0, self.FLAGS.cont_length-1)
 
 
-    def get_loss(self, beg_logits, end_logits, beg_labels, end_labels):
+    def get_loss(self, beg_logits, end_logits):
         """
         Set up your loss computation here
         :return:
         """
         with vs.variable_scope("loss"):
+            self.beg_labels, self.end_labels = self.get_labels(self.ans)
             self.beg_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=beg_labels, logits=beg_logits)
             self.end_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=end_labels, logits=end_logits)
-            #example_sum_loss = tf.reduce_sum(beg_losses + end_losses, axis=1)
-            '''
-            self.loss_s =  tf.reduce_mean(self.beg_loss_s + self.end_loss_s)
-
-            self.beg_loss_un_me = tf.log(self.beg_prob) * tf.cast(beg_labels, tf.float32)
-            self.end_loss_un_me = tf.log(self.end_prob) * tf.cast(end_labels, tf.float32)
-            self.beg_loss_me = self.beg_loss_un_me * tf.cast(self.mask, tf.float32)
-            self.end_loss_me = self.end_loss_un_me * tf.cast(self.mask, tf.float32)
-
-            self.beg_reduced_me = tf.reduce_sum(self.beg_loss_me, axis=1)
-            self.end_reduced_me = tf.reduce_sum(self.end_loss_me, axis=1)
-            self.loss_me = tf.reduce_mean(self.beg_reduced_me + self.end_reduced_me)
-
-
-
-
-            self.beg_loss_un = tf.losses.log_loss(beg_labels, self.beg_prob, reduction='none')
-            self.end_loss_un = tf.losses.log_loss(end_labels, self.end_prob, reduction='none')
-            self.beg_loss = self.beg_loss_un * tf.cast(self.mask, tf.float32)
-            self.end_loss = self.end_loss_un * tf.cast(self.mask, tf.float32)
-
-            self.beg_reduced = tf.reduce_sum(self.beg_loss, axis=1)
-            self.end_reduced = tf.reduce_sum(self.end_loss, axis=1)
-            '''
             return tf.reduce_mean(self.beg_loss + self.end_loss)
 
 
