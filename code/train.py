@@ -15,7 +15,7 @@ import shutil
 import logging
 
 logging.basicConfig(level=logging.INFO)
-MODEL_NAME= 'multi_35'
+MODEL_NAME= 'mult_per_match_35'
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
@@ -122,123 +122,62 @@ def test_device_placement():
         print(test_sess.run(test_mat_mul))
 
 def main(_):
-
     test_device_placement()
-
     # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
-
     #prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
-
-    prepend = '' #FLAGS.sample_data_prepend
-
+    prepend = FLAGS.sample_data_prepend
     val_only = True if len(sys.argv) > 1 and sys.argv[1] == 'val_only' else False
 
-
-
     print('Reading data')
-
     print('==================')
-
-
 
     val_set = fetch_data_set(prepend, 'val')
-
     if val_only:
-
         tr_set_size = 0
-
     else:
-
         tr_set = fetch_data_set(prepend, 'train')
-
         tr_set_size = tr_set[0].shape[0]
-
     print('Finished reading data')
-
     print('==================')
-
-
-
 
 
     embed_path = FLAGS.embed_path or pjoin("data", "squad", "glove.trimmed.{}.npz".format(FLAGS.embedding_size))
-
     vocab_path = FLAGS.vocab_path or pjoin(FLAGS.data_dir, "vocab.dat")
 
-
-
     #vocab is map from words to indices, rev_vocab is our list of words in reverse frequency order
-
     vocab, rev_vocab = initialize_vocab(vocab_path)
-
-
 
     idx_word = data_utils.invert_map(vocab)
 
-
-
     encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
-
     decoder = Decoder(output_size=FLAGS.output_size)
 
-
-
     del vocab
-
     del rev_vocab
-
-    qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, val_only, tr_set_size)
-
-
-
-
+    #qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, val_only, tr_set_size, False)
+    qa = QASystem(FLAGS, embed_path, idx_word, False, tr_set_size, False)
 
     if not os.path.exists(FLAGS.log_dir):
-
         os.makedirs(FLAGS.log_dir)
-
     file_handler = logging.FileHandler(pjoin(FLAGS.log_dir, "log.txt"))
-
     logging.getLogger().addHandler(file_handler)
 
-
-
     #print(vars(FLAGS))
-
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
-
         json.dump(FLAGS.__flags, fout)
 
 
-
-
-
     with tf.Session() as sess:
-
         #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
-
         initialize_model(sess, qa, FLAGS.train_dir)
-
         #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
-
         if val_only:
-
             print('Running validation only')
-
             qa.validate(sess, val_set, 'validation')
-
         else:
-
             qa.train(sess, tr_set, val_set, FLAGS.train_dir)
-
-
 
         #qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
 
-
-
 if __name__ == "__main__":
-
     tf.app.run()
-
-
