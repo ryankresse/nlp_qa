@@ -276,22 +276,6 @@ class QASystem(object):
 
         return outputs
 
-    def test(self, session, valid_x, valid_y):
-        """
-        in here you should compute a cost for your validation set
-        and tune your hyperparameters according to the validation set performance
-        :return:
-        """
-        input_feed = {}
-
-        # fill in this feed_dictionary like:
-        # input_feed['valid_x'] = valid_x
-
-        output_feed = []
-
-        outputs = session.run(output_feed, input_feed)
-
-        return outputs
 
 
     def answer(self, session, test_x):
@@ -708,7 +692,7 @@ class QASystem(object):
         all_ends = []
         for i in range(num_batches):
             print('Batch {} of {}'.format(i+1, num_batches))
-            #if i == 2: break
+            #if i == 10: break
             #if (i == num_batches-1): break
             starts, ends = self.test_on_batch(sess)
             all_starts.append(starts)

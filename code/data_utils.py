@@ -52,6 +52,10 @@ def read_clip_and_pad(path, length, pad_token):
     data = pad_sequences(data, length, pad_token)
     return np.array(clip_sequences(data, length), dtype=np.int32)
 
+def clip_and_pad(data, length, pad_token):
+    data = pad_sequences(data, length, pad_token)
+    return np.array(clip_sequences(data, length))
+
 def read_and_pad(path, length, pad_token):
     data = read_token_data_file(path)
     return np.array(pad_sequences(data, length, pad_token),  dtype=np.int32)

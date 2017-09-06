@@ -96,7 +96,6 @@ def read_dataset(dataset, tier, vocab):
     query_data = []
     question_uuid_data = []
     context_text = []
-
     for articles_id in tqdm(range(len(dataset['data'])), desc="Preprocessing {}".format(tier)):
         article_paragraphs = dataset['data'][articles_id]['paragraphs']
         for pid in range(len(article_paragraphs)):
@@ -111,6 +110,7 @@ def read_dataset(dataset, tier, vocab):
             qas = article_paragraphs[pid]['qas']
             for qid in range(len(qas)):
                 question = qas[qid]['question']
+
                 question_tokens = tokenize(question)
                 question_uuid = qas[qid]['id']
 
@@ -128,6 +128,7 @@ def read_dataset(dataset, tier, vocab):
 
                 question_uuid_data.append(question_uuid)
                 context_text.append(context_tokens)
+
     query_data = data_utils.clip_and_pad(query_data, FLAGS.quest_length, FLAGS.pad_token)
     context_data = data_utils.clip_and_pad(context_data, FLAGS.cont_length, FLAGS.pad_token)
     context_text =  data_utils.clip_and_pad(context_text, FLAGS.cont_length, FLAGS.pad_token)
@@ -137,33 +138,33 @@ def read_dataset(dataset, tier, vocab):
 def prepare_dev(prefix, dev_filename, vocab):
     # Don't check file size, since we could be using other datasets
     dev_dataset = maybe_download(squad_base_url, dev_filename, prefix)
-
     dev_data = data_from_json(os.path.join(prefix, dev_filename))
-
     context_data, question_data, question_uuid_data, context_text = read_dataset(dev_data, 'dev', vocab)
-    #for i in range(len(context_data)):
-    #context_data = [int(t) for t in l in context_data in l.split()]
-
     return context_data, question_data, question_uuid_data, context_text
 
 def get_ans_words(starts_ends, cont, idx_word):
-    words = []
-
+    word_lists = []
     for ix in np.arange(starts_ends.shape[0]):
-
         start = starts_ends[ix, 0]; end = starts_ends[ix,1];
         if start > end:
-            words.append([])
+            word_lists.append([])
         elif start == end:
             #select the token from the training example at the start position, then get the word for it
             #words.append([idx_word[cont[ix, start]]])
-            words.append(cont[ix, start])
+            word_lists.append([cont[ix, start]])
         else:
             ws = cont[ix, start:end + 1]
-            words.append(ws)
+            word_lists.append(ws)
             #words.append([idx_word[tok] for tok in tokens])
-
-    return [" ".join(w) for w in words]
+    to_return = []
+    for l in word_lists:
+        if len(l) == 0:
+            to_return.append("")
+        elif len(l) == 1:
+            to_return.append(unicode(l[0], 'utf-8'))
+        else:
+            to_return.append(" ".join([unicode(w, 'utf-8') for w in l]))
+    return to_return
 
 def generate_answers(sess, model, dataset, rev_vocab, context_text, idx_word):
     all_starts =[]; all_ends = [];
@@ -174,9 +175,8 @@ def generate_answers(sess, model, dataset, rev_vocab, context_text, idx_word):
     answers = {}
     for uid, words in zip(dataset[2], pred_words):
         answers[uid] = words
-    with open('answers.pkl', 'w') as f:
+    with open('answers2.pkl', 'w') as f:
         pickle.dump(answers, f)
-
     return answers
 
 
@@ -217,7 +217,6 @@ def main(_):
     dev_dirname = os.path.dirname(os.path.abspath(FLAGS.dev_path))
     dev_filename = os.path.basename(FLAGS.dev_path)
     context_data, question_data, question_uuid_data, context_text = prepare_dev(dev_dirname, dev_filename, vocab)
-    #pdb.set_trace()
     dataset = (context_data, question_data, question_uuid_data)
     #so you need you model to have an evaluation mode.
     #use the same setup as validation.
@@ -227,12 +226,12 @@ def main(_):
     # You must change the following code to adjust to your model
 
     idx_word = data_utils.invert_map(vocab)
-
     qa = QASystem(FLAGS, embed_path, idx_word, False, 0, True)
     with tf.Session() as sess:
         initialize_model(sess, qa, FLAGS.train_dir)
         #start, end = qa.test(sess, dataset)
         #pdb.set_trace()
+
         answers = generate_answers(sess, qa, dataset, rev_vocab, context_text, idx_word)
         #with open('answers.pkl', 'r') as f:
         #    ans = pickle.load(f)
@@ -241,8 +240,8 @@ def main(_):
         #pdb.set_trace()
         # write to json file to root dir
 
-        with io.open('dev-prediction.json', 'w', encoding='utf-8') as f:
-            f.write(unicode(json.dumps(answers, ensure_ascii=False, encoding='latin-1')))
+        with io.open('dev-prediction_2.json', 'w', encoding='utf-8') as f:
+            f.write(unicode(json.dumps(answers, ensure_ascii=False)))
 
 if __name__ == "__main__":
   tf.app.run()
