@@ -28,59 +28,11 @@ def get_optimizer(opt):
     return optfn
 
 
-#this is where you should take your input and transform it into your symbolic representation
-class Encoder(object):
-    def __init__(self, size, vocab_dim):
-        self.size = size
-        self.vocab_dim = vocab_dim
 
-    def encode(self, inputs, masks, encoder_state_input):
-        """
-        In a generalized encode function, you pass in your inputs,
-        masks, and an initial
-        hidden state input into this function.
-
-        :param inputs: Symbolic representations of your input
-        :param masks: this is to make sure tf.nn.dynamic_rnn doesn't iterate
-                      through masked steps
-        :param encoder_state_input: (Optional) pass this as initial hidden state
-                                    to tf.nn.dynamic_rnn to build conditional representations
-        :return: an encoded representation of your input.
-                 It can be context-level representation, word-level representation,
-                 or both.
-        """
-
-        return
-
-#this takes your symbolic representation and produces our ouput probabilities.
-class Decoder(object):
-    def __init__(self, output_size):
-        self.output_size = output_size
-
-    def decode(self, knowledge_rep):
-        """
-        takes in a knowledge representation
-        and output a probability estimation over
-        all paragraph tokens on which token should be
-        the start of the answer span, and which should be
-        the end of the answer span.
-
-        :param knowledge_rep: it is a representation of the paragraph and question,
-                              decided by how you choose to implement the encoder
-        :return:
-        """
-
-        return
 
 class QASystem(object):
     def __init__(self, *args):
-        """
-        Initializes your System
 
-        :param encoder: an encoder that you constructed in train.py
-        :param decoder: a decoder that you constructed in train.py
-        :param args: pass in more arguments as needed
-        """
         self.FLAGS = args[0]
         embed_path = args[1]
         self.idx_word = args[2]
@@ -90,13 +42,14 @@ class QASystem(object):
 
         self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove'].astype(np.float32)
         # ==== set up placeholder tokens ========
+
+        '''
         self.cont_placeholer = None
         self.quest_placeholder = None
         self.ans_placeholder = None
         self.dropout_placeholder = None
+        '''
 
-
-        #self.add_placeholders()
         # ==== assemble pieces ====
         with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
             self.add_weights()
@@ -104,7 +57,6 @@ class QASystem(object):
             self.setup_system()
 
     def add_weights(self):
-        #out is (batch, quest_length, hidden_size*2)
         with tf.variable_scope('weights') as scope:
             self.weights = {
                 'beg_mlp_weight1': tf.get_variable('beg_mlp_weight1',shape=[self.FLAGS.state_size*2, self.FLAGS.state_size*2], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
@@ -112,7 +64,6 @@ class QASystem(object):
                 'beg_mlp_weight2': tf.get_variable('beg_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
                 'end_mlp_weight2': tf.get_variable('end_mlp_weight2',shape=[self.FLAGS.state_size*2, 1], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
                 'full_att_weight': tf.get_variable('full_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
-                #'attention_weight': tf.get_variable('attention_weight', shape=[self.FLAGS.state_size*4, self.FLAGS.state_size*2], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
                 'max_att_weight': tf.get_variable('max_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
                 'mean_att_weight': tf.get_variable('mean_att_weight', shape=[self.FLAGS.num_perspectives, self.FLAGS.state_size], dtype=tf.float32, initializer=tf.contrib.layers.xavier_initializer()),
                 }
@@ -126,6 +77,7 @@ class QASystem(object):
                 'end_mlp_bias2': tf.get_variable('end_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32)
                 }
 
+    '''
     def add_placeholders(self):
         """Generates placeholder variables to represent the input tensors
 
@@ -143,7 +95,7 @@ class QASystem(object):
         self.cont_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.cont_length))
         self.ans_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
         self.dropout_placeholder = tf.placeholder(tf.float32, shape=(None))
-
+    '''
 
     def create_datasets(self):
 
@@ -151,11 +103,6 @@ class QASystem(object):
         self.cont_data_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.cont_length))
         self.ans_data_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
 
-        '''
-        self.quest_text_placeholder =  tf.placeholder(tf.string, shape=(None))
-        self.cont_text_placeholder = tf.placeholder(tf.string, shape=(None))
-        self.ans_text_placeholder = tf.placeholder(tf.string, shape=(None))
-        '''
         if not self.is_test:
             shapes = (tf.TensorShape([None, self.FLAGS.quest_length]), tf.TensorShape([None, self.FLAGS.cont_length]), tf.TensorShape([None, self.FLAGS.ans_length]))
             self.iterator = tf.contrib.data.Iterator.from_structure((tf.int32, tf.int32, tf.int32), shapes)
@@ -184,12 +131,6 @@ class QASystem(object):
 
 
     def setup_system(self):
-        """
-        After your modularized implementation of encoder and decoder
-        you should call various functions inside encoder, decoder here
-        to assemble your reading comprehension system!
-        :return:
-        """
 
         self.create_datasets()
         self.lr = self.FLAGS.learning_rate
@@ -215,15 +156,12 @@ class QASystem(object):
         items_flat = tf.reshape(items, [-1])
         cont_flat = tf.reshape(self.cont, [-1])
         self.mask = tf.sign(tf.cast(cont_flat, dtype=tf.float32))
-
-        #neg_infs = tf.ones(items_flat.shape, tf.float32) * tf.constant(-1.0*np.inf, tf.float32)
         masked_items = items_flat * mask
         masked_items = tf.reshape(masked_items, tf.shape(items))
         return masked_items, mask
 
     def clip_labels(self, labels):
         return tf.clip_by_value(labels, 0, self.FLAGS.cont_length-1)
-
 
     def get_loss(self, beg_logits, end_logits):
         """
@@ -232,8 +170,8 @@ class QASystem(object):
         """
         with vs.variable_scope("loss"):
             self.beg_labels, self.end_labels = self.get_labels(self.ans)
-            self.beg_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=beg_labels, logits=beg_logits)
-            self.end_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=end_labels, logits=end_logits)
+            self.beg_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.beg_labels, logits=beg_logits)
+            self.end_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.end_labels, logits=end_logits)
             return tf.reduce_mean(self.beg_loss + self.end_loss)
 
 
@@ -251,100 +189,10 @@ class QASystem(object):
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.lr)
         gradients, var = zip(*optimizer.compute_gradients(loss))
-        self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float32) #tf.cond(loss > 50000, lambda: tf.constant(100.0, dtype=tf.float32), lambda: tf.constant(self.FLAGS.max_gradient_norm, dtype=tf.float32))
-
+        self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float32)
         gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
-
         train_op = optimizer.apply_gradients(zip(gradients, var))
         return train_op, grad_norm
-
-
-    def optimize(self, session, train_x, train_y):
-        """
-        Takes in actual data to optimize your model
-        This method is equivalent to a step() function
-        :return:
-        """
-        input_feed = {}
-
-        # fill in this feed_dictionary like:
-        # input_feed['train_x'] = train_x
-
-        output_feed = []
-
-        outputs = session.run(output_feed, input_feed)
-
-        return outputs
-
-
-
-    def answer(self, session, test_x):
-
-        yp, yp2 = self.decode(session, test_x)
-
-        a_s = np.argmax(yp, axis=1)
-        a_e = np.argmax(yp2, axis=1)
-
-        return (a_s, a_e)
-
-    def evaluate_answer(self, session, dataset, sample=100, log=False):
-        """
-        Evaluate the model's performance using the harmonic mean of F1 and Exact Match (EM)
-        with the set of true answer labels
-
-        This step actually takes quite some time. So we can only sample 100 examples
-        from either training or testing set.
-
-        :param session: session should always be centrally managed in train.py
-        :param dataset: a representation of our data, in some implementations, you can
-                        pass in multiple components (arguments) of one dataset to this function
-        :param sample: how many examples in dataset we look at
-        :param log: whether we print to std out stream
-        :return:
-        """
-
-        f1 = 0.
-        em = 0.
-
-        if log:
-            logging.info("F1: {}, EM: {}, for {} samples".format(f1, em, sample))
-
-        return f1, em
-
-
-    def create_feed_dict(self, quest_batch, cont_batch, ans_batch, dropout):
-         """Creates the feed_dict for the dependency parser.
-
-         A feed_dict takes the form of:
-
-         feed_dict = {
-                 <placeholder>: <tensor of values to be passed for placeholder>,
-                 ....
-         }
-
-         Hint: The keys for the feed_dict should be a subset of the placeholder
-                     tensors created in add_placeholders.
-         Hint: When an argument is None, don't add it to the feed_dict.
-
-         Args:
-         Returns:
-             feed_dict: The feed dictionary mapping from placeholders to values.
-         """
-         if ans_batch is None:
-             feed_dict = {
-                 self.quest_placeholder: quest_batch,
-                 self.cont_placeholder: cont_batch,
-                 self.dropout_placeholder: dropout
-             }
-         else:
-             feed_dict = {
-                 self.quest_placeholder: quest_batch,
-                 self.cont_placeholder: cont_batch,
-                 self.dropout_placeholder: dropout,
-                 self.ans_placeholder: ans_batch
-             }
-         return feed_dict
-
 
     def input_lstm(self, quest_embed, quest_lens, filtered_cont, cont_lens):
         with tf.variable_scope('input_lstm', initializer=tf.contrib.layers.xavier_initializer()) as scope:
@@ -387,41 +235,11 @@ class QASystem(object):
             logits = []
             for example in np.arange(self.FLAGS.batch_size):
                 ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, state*2) = (cont_length, state*2)
-                hid = tf.nn.relu(tf.matmul(ex, weights[0]) + bias[0]) # #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, 1) = (cont_length, 1)
+                hid = tf.nn.dropout(tf.nn.relu(tf.matmul(ex, weights[0]) + bias[0]), 0.8) # #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, 1) = (cont_length, 1)
                 out = tf.matmul(hid, weights[1]) + bias[1]  #(cont_length, state_size*2).dot(self.FLAGS.state_size*2, 1) = (cont_length, 1)
 
                 logits.append(out) #(1, 300)
             return tf.squeeze(tf.stack(logits))
-
-    def get_beg_logits(self, raw_output):
-        #raw_output is (batch, quest+cont_length, embed_size)
-        with tf.variable_scope('beg_logits') as scope:
-            logits = []
-            for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1])) #(cont_length, state_size*2)
-                out = tf.nn.relu(tf.matmul(ex, self.weights['beg_mlp_weight1']) + self.biases['beg_mpl_bias1']) #(state*2)
-
-                logits.append(out) #(1, 300)
-            return tf.squeeze(tf.stack(logits))
-
-    def get_end_logits(self, raw_output):
-        with tf.variable_scope('end_logits') as scope:
-            logits = []
-            for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(raw_output, [example, 0, 0], [1, -1,-1]))
-                out = tf.nn.relu(tf.matmul(ex, self.weights['end_mlp_weight1']) + self.biases['end_mpl_bias1'])
-                logits.append(out)
-            return tf.squeeze(tf.stack(logits))
-
-
-    def transform_scaled_cont_concat(self, cont_concat):
-        with tf.variable_scope('reshape_scaled_cont_concat') as scope:
-            reshaped = []
-            for example in np.arange(self.FLAGS.batch_size):
-                ex = tf.squeeze(tf.slice(cont_concat, [example, 0, 0], [1, -1,-1]))
-                out = tf.nn.relu(tf.matmul(ex, self.weights['attention_weight'])) # (300, 800) * (800, 400)
-                reshaped.append(out)
-            return tf.squeeze(tf.stack(reshaped))
 
     def filter_cont(self, quest, cont):
         with tf.variable_scope('filter_cont') as scope:
@@ -450,23 +268,13 @@ class QASystem(object):
             mean_atts = self.get_reduced_atts(quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw, 'mean_atts', self.weights['mean_att_weight'], tf.reduce_mean)
 
             to_return.append(tf.concat([full_atts, max_atts, mean_atts], axis=0))
-        return tf.stack(to_return)
+        return tf.nn.dropout(tf.stack(to_return), 0.8)
 
-    '''
-    def cos_sim(self, first, second, scope_name):
-        with tf.variable_scope(scope_name):
-            first = tf.nn.l2_normalize(first, dim=1)
-            second = tf.nn.l2_normalize(second, dim=1)
-            cos_sim = tf.matmul(first, tf.transpose(second))
-            return cos_sim
-    '''
 
     def get_full_atts(self, quest_reps_fw, quest_reps_bw, cont_reps_fw, cont_reps_bw):
 
         last_quest_reps_fw = tf.slice(quest_reps_fw, [self.FLAGS.quest_length-1, 0], [1,-1]) #(1, state)
         last_quest_reps_bw = tf.slice(quest_reps_fw, [0, 0], [1,-1]) #(1, state)
-        #last_quest_reps_fw = tf.multiply(last_quest_reps_fw, self.weights['full_att_weight']) # (1, state) * (num_per, state) = (num_per, state)
-
         full_att_fw = self.calc_full_atts(last_quest_reps_fw, cont_reps_fw, self.weights['full_att_weight'], 'fw')
         full_att_bw = self.calc_full_atts(last_quest_reps_bw, cont_reps_bw, self.weights['full_att_weight'], 'bw')
         return tf.concat([full_att_fw, full_att_bw], 0) #(num_per, cont)
@@ -512,8 +320,6 @@ class QASystem(object):
 
     def scale_cont(self, cont, att):
         scaled = []
-        #for example in batch
-
         for example in np.arange(self.FLAGS.batch_size):
             ex = tf.slice(cont,[example, 0, 0], [1, -1, -1])
             ex = tf.squeeze(ex)
@@ -554,28 +360,14 @@ class QASystem(object):
 
         self.beg_logits = self.get_logits(self.aggregated, [self.weights['beg_mlp_weight1'], self.weights['beg_mlp_weight2']], [self.biases['beg_mlp_bias1'], self.biases['beg_mlp_bias2']], 'beg_logits') #(state*2)
         self.end_logits = self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits')
-
-
-        #self.beg_logits, _ = self.apply_mask(self.get_logits(self.aggregated, [self.weights['beg_mlp_weight1'], self.weights['beg_mlp_weight2']], [self.biases['beg_mlp_bias1'], self.biases['beg_mlp_bias2']], 'beg_logits')) #(state*2)
-        #self.end_logits, self.end_mask = self.apply_mask(self.get_logits(self.aggregated,[self.weights['end_mlp_weight1'], self.weights['end_mlp_weight2']], [self.biases['end_mlp_bias1'], self.biases['end_mlp_bias2']], 'end_logits'))
         return self.beg_logits, self.end_logits
-
-
-    def debug_on_batch(self, sess, quest_batch, cont_batch, ans_batch):
-        feed = self.create_feed_dict(quest_batch, cont_batch, ans_batch, self.FLAGS.dropout)
-        quest_last_hid, cont_out = sess.run([self.self.quest_last_hid, self.cont_out], feed_dict=feed)
-        _, loss, logits, grad_norm = sess.run([self.train_op, self.loss, self.pred, self.grad_norm], feed_dict=feed)
-        return loss, logits, grad_norm
 
     def get_pred(self, probs):
         return tf.argmax(probs, axis=1)
 
     def get_end_pred(self, probs, start_pos):
-
         self.ranges = tf.cast(tf.tile(tf.expand_dims(tf.range(self.FLAGS.cont_length), 0), [self.FLAGS.batch_size,1]), tf.int64)
-
         self.pred_mask = tf.less(self.ranges, tf.expand_dims(start_pos, 1))
-
         self.masked_probs = tf.where(self.pred_mask, tf.zeros((self.FLAGS.batch_size, self.FLAGS.cont_length)), probs)
         return tf.argmax(self.masked_probs, axis=1)
 
@@ -589,15 +381,9 @@ class QASystem(object):
     def add_weights_bias_summary(self):
         for var in tf.trainable_variables():
             tf.summary.histogram(var.name, var)
-        '''for k, v in self.weights.items():
-            self.variable_summaries(k,v)
-        for k, v in self.biases.items():
-            self.variable_summaries(k,v)
-        '''
 
     def variable_summaries(self, name, var):
         """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
-
         with tf.name_scope(name):
             mean = tf.reduce_mean(var)
             tf.summary.scalar('mean', mean)
@@ -632,13 +418,9 @@ class QASystem(object):
         print("")
         return avg_loss, avg_f1
 
-    def write_prob(self, beg_prob, end_prob):
-        np.save(self.FLAGS.beg_prob_file, beg_prob)
-        np.save(self.FLAGS.end_prob_file, end_prob)
+
 
     def train_on_batch(self, sess):
-        #contembed, questembed= sess.run([self.cont_embed, self.quest_embed])
-        #pdb.set_trace()
         to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
         train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
         return loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged
@@ -660,7 +442,6 @@ class QASystem(object):
         all_ends = []
         for i in range(num_batches -1):
             print('Batch {} of {}'.format(i+1, num_batches))
-            #if i == 2: break
             if (i == num_batches-1): break
             loss, ans, cont, starts, ends = self.validate_on_batch(sess)
             all_starts.append(starts)
@@ -676,8 +457,6 @@ class QASystem(object):
         return avg_loss, f1
 
     def test_on_batch(self, sess):
-        #quest, cont, ql, cl  =  sess.run([self.quest, self.cont, self.quest_lens, self.cont_lens])
-        #pdb.set_trace()
         starts, ends  =  sess.run([self.starts, self.ends])
         return starts, ends
 
@@ -692,18 +471,12 @@ class QASystem(object):
         all_ends = []
         for i in range(num_batches):
             print('Batch {} of {}'.format(i+1, num_batches))
-            #if i == 10: break
-            #if (i == num_batches-1): break
             starts, ends = self.test_on_batch(sess)
             all_starts.append(starts)
             all_ends.append(ends)
-
-
         all_starts = np.hstack(all_starts)
         all_ends = np.hstack(all_ends)
         return all_starts, all_ends
-
-
 
 
     def run_epoch(self, sess, train_examples, epoch):
@@ -712,15 +485,12 @@ class QASystem(object):
         for i in range(num_batches - 1):
             print('Batch {} of {}'.format(i+1, num_batches))
             sess.run(self.tr_inititializer, feed_dict={self.quest_data_placeholder: train_examples[0], self.cont_data_placeholder:train_examples[1], self.ans_data_placeholder:train_examples[2]})
-
-            #if (i == 2): break #
-            if (i == num_batches - 1): break #
+            if (i == num_batches - 1): break
             loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged  = self.train_on_batch(sess)
             running_loss +=loss
             print('loss: {:.2E}, grad_norm: {}'.format(loss, grad_norm))
             if i % 200 == 0:
                 self.write_summaries(merged, epoch, i, num_batches)
-                self.write_prob(beg_prob, end_prob)
 
         avg_loss = running_loss / num_batches
 
@@ -728,8 +498,6 @@ class QASystem(object):
         print('=========================')
 
         return avg_loss, grad_norm, beg_prob, end_prob
-
-
 
 
     def retrieve_prev_best_score(self):
@@ -785,11 +553,7 @@ class QASystem(object):
         num_since_improve = 0
 
         for epoch in range(epoch_num, epoch_num + self.FLAGS.epochs):
-            if epoch == 3:
-                pass
-                #self.lr *= 10
             epoch_num += 1
-
             print('')
             logger.info("Training for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
             print('==========')
@@ -799,7 +563,7 @@ class QASystem(object):
             print('=========================')
             toc = time.time()
             epoch_dur = (toc - tic) / 60
-            logger.info("Epoch took {} minutes".format(epoch_dur))
+            logger.info("Epoch training took {} minutes".format(epoch_dur))
 
             logger.info("Validating for epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
             print('==========')
@@ -811,13 +575,10 @@ class QASystem(object):
             self.write_to_train_logs(tr_loss, val_loss, val_f1, epoch_dur)
             logger.info("Epoch took {} minutes".format(epoch_dur))
 
-            #logger.info("Epoch %d out of %d", epoch_num, epoch_num + self.FLAGS.epochs)
-
             if val_loss < best_score:
                 best_score = val_loss
                 num_since_improve = 0
                 self.save_model(best_score, epoch_num, saver, sess)
-
             else:
                 num_since_improve +=1
                 if num_since_improve == 3:
@@ -826,56 +587,9 @@ class QASystem(object):
                 self.lr *= .10
                 print('Validation loss did not improve. Decreasing learning rate to {:.2E}'.format(self.lr))
 
-            if tr_loss < best_score:
-                pass
-		#best_score = tr_loss
-                #num_since_improve = 0
-                #self.save_model(best_score, epoch_num, saver, sess)
-            else:
-                pass
-                #self.lr, num_since_improve = self.maybe_change_lr(best_score, num_since_improve)
-
-            '''
-            if self.report:
-                self.report.log_epoch()
-                self.report.save()
-            '''
         return best_score
 
 
     def train(self, session, tr_set, val_set, train_dir):
-        """
-        Implement main training loop
-
-        TIPS:
-        You should also implement learning rate annealing (look into tf.train.exponential_decay)
-        Considering the long time to train, you should save your model per epoch.
-
-        More ambitious appoarch can include implement early stopping, or reload
-        previous models if they have higher performance than the current one
-
-        As suggested in the document, you should evaluate your training progress by
-        printing out information every fixed number of iterations.
-
-        We recommend you evaluate your model performance on F1 and EM instead of just
-        looking at the cost.
-
-        :param session: it should be passed in from train.py
-        :param dataset: a representation of our data, in some implementations, you can
-                        pass in multiple components (arguments) of one dataset to this function
-        :param train_dir: path to the directory where you should save the model checkpoint
-        :return:
-        """
-
-        # some free code to print out number of parameters in your model
-        # it's always good to check!
-        # you will also want to save your model parameters in train_dir
-        # so that you can use your trained model to make predictions, or
-        # even continue training
         saver = self.saver
-        tic = time.time()
-        params = tf.trainable_variables()
-        #num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
-        toc = time.time()
-        #logging.info("Number of params: %d (retreival took %f secs)" % (num_params, toc - tic))
         self.fit(session, saver, tr_set, val_set, train_dir)

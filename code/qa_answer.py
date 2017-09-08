@@ -16,7 +16,7 @@ import tensorflow as tf
 import data_utils
 import pickle
 
-from qa_model import Encoder, QASystem, Decoder
+from qa_model import QASystem
 from preprocessing.squad_preprocess import data_from_json, maybe_download, squad_base_url, \
     invert_map, tokenize, token_idx_map
 import qa_data
@@ -114,12 +114,6 @@ def read_dataset(dataset, tier, vocab):
                 question_tokens = tokenize(question)
                 question_uuid = qas[qid]['id']
 
-                '''context_ids = [str(vocab.get(w, qa_data.UNK_ID)) for w in context_tokens]
-                qustion_ids = [str(vocab.get(w, qa_data.UNK_ID)) for w in question_tokens]
-
-                context_data.append(' '.join(context_ids))
-                query_data.append(' '.join(qustion_ids))
-                '''
 
                 context_ids =[int(vocab.get(w, qa_data.UNK_ID)) for w in context_tokens]
                 qustion_ids = [int(vocab.get(w, qa_data.UNK_ID)) for w in question_tokens]
@@ -150,12 +144,10 @@ def get_ans_words(starts_ends, cont, idx_word):
             word_lists.append([])
         elif start == end:
             #select the token from the training example at the start position, then get the word for it
-            #words.append([idx_word[cont[ix, start]]])
             word_lists.append([cont[ix, start]])
         else:
             ws = cont[ix, start:end + 1]
             word_lists.append(ws)
-            #words.append([idx_word[tok] for tok in tokens])
     to_return = []
     for l in word_lists:
         if len(l) == 0:
@@ -170,13 +162,10 @@ def generate_answers(sess, model, dataset, rev_vocab, context_text, idx_word):
     all_starts =[]; all_ends = [];
     starts, ends = model.test(sess, dataset)
     pred_words = get_ans_words(np.hstack([np.expand_dims(starts,1), np.expand_dims(ends,1)]), context_text, idx_word)
-    #f1 = self.evaluate_performance(pred_words, ans_text)
 
     answers = {}
     for uid, words in zip(dataset[2], pred_words):
         answers[uid] = words
-    with open('answers2.pkl', 'w') as f:
-        pickle.dump(answers, f)
     return answers
 
 
@@ -211,34 +200,21 @@ def main(_):
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
-    # ========= Load Dataset =========
-    # You can change this code to load dataset in your own way
 
     dev_dirname = os.path.dirname(os.path.abspath(FLAGS.dev_path))
     dev_filename = os.path.basename(FLAGS.dev_path)
     context_data, question_data, question_uuid_data, context_text = prepare_dev(dev_dirname, dev_filename, vocab)
     dataset = (context_data, question_data, question_uuid_data)
-    #so you need you model to have an evaluation mode.
-    #use the same setup as validation.
 
 
-    # ========= Model-specific =========
-    # You must change the following code to adjust to your model
 
     idx_word = data_utils.invert_map(vocab)
     qa = QASystem(FLAGS, embed_path, idx_word, False, 0, True)
     with tf.Session() as sess:
         initialize_model(sess, qa, FLAGS.train_dir)
-        #start, end = qa.test(sess, dataset)
-        #pdb.set_trace()
+        start, end = qa.test(sess, dataset)
 
         answers = generate_answers(sess, qa, dataset, rev_vocab, context_text, idx_word)
-        #with open('answers.pkl', 'r') as f:
-        #    ans = pickle.load(f)
-        #pdb.set_trace()
-        #d = json.dumps(ans,  ensure_ascii=False, encoding='latin-1')
-        #pdb.set_trace()
-        # write to json file to root dir
 
         with io.open('dev-prediction_2.json', 'w', encoding='utf-8') as f:
             f.write(unicode(json.dumps(answers, ensure_ascii=False)))

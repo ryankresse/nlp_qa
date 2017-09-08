@@ -8,14 +8,14 @@ import pdb
 import tensorflow as tf
 import sys
 import numpy as np
-from qa_model import Encoder, QASystem, Decoder
+from qa_model import QASystem
 from os.path import join as pjoin
 import data_utils
 import shutil
 import logging
 
 logging.basicConfig(level=logging.INFO)
-MODEL_NAME= 'mult_per_match_35'
+MODEL_NAME= 'mult_per_match_35_blog'
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")
@@ -66,12 +66,10 @@ def initialize_model(session, model, train_dir):
         session.run(tf.global_variables_initializer())
         with open(FLAGS.prev_best_score_file, 'w') as f: #clear any best score from other models
             f.write('')
-        shutil.rmtree(FLAGS.summaries_dir) # remove summarries from previous model
+        shutil.rmtree(FLAGS.summaries_dir) # remove summaries from previous model
         os.makedirs(FLAGS.summaries_dir)
         os.remove(FLAGS.train_stats_file)
         os.mknod(FLAGS.train_stats_file)
-
-        #logging.info('Num params: %d' % sum(v.get_shape().num_elements() for v in tf.trainable_variables()))
     return model
 
 
@@ -123,11 +121,12 @@ def test_device_placement():
 
 def main(_):
     test_device_placement()
-    # if the user doesn't pass in 'train' on the command line, we're just going to use a small subest of the train data
-    #prepend = '' if len(sys.argv) > 1 and sys.argv[1] == 'train' else FLAGS.sample_data_prepend
-    prepend = FLAGS.sample_data_prepend
-    val_only = True if len(sys.argv) > 1 and sys.argv[1] == 'val_only' else False
 
+    prepend = FLAGS.sample_data_prepend # change this FLAGS value to an empty string to train on the full data set.
+
+
+    #Some logic that lets us only run validation. It should be cleaner.
+    val_only = True if len(sys.argv) > 1 and sys.argv[1] == 'val_only' else False
     print('Reading data')
     print('==================')
 
@@ -149,12 +148,10 @@ def main(_):
 
     idx_word = data_utils.invert_map(vocab)
 
-    encoder = Encoder(size=FLAGS.state_size, vocab_dim=FLAGS.embedding_size)
-    decoder = Decoder(output_size=FLAGS.output_size)
 
     del vocab
     del rev_vocab
-    #qa = QASystem(encoder, decoder, FLAGS, embed_path, idx_word, val_only, tr_set_size, False)
+
     qa = QASystem(FLAGS, embed_path, idx_word, False, tr_set_size, False)
 
     if not os.path.exists(FLAGS.log_dir):
@@ -162,22 +159,18 @@ def main(_):
     file_handler = logging.FileHandler(pjoin(FLAGS.log_dir, "log.txt"))
     logging.getLogger().addHandler(file_handler)
 
-    #print(vars(FLAGS))
     with open(os.path.join(FLAGS.log_dir, "flags.json"), 'w') as fout:
         json.dump(FLAGS.__flags, fout)
 
 
     with tf.Session() as sess:
-        #load_train_dir = get_normalized_train_dir(FLAGS.load_train_dir or FLAGS.train_dir)
         initialize_model(sess, qa, FLAGS.train_dir)
-        #save_train_dir = get_normalized_train_dir(FLAGS.train_dir)
         if val_only:
             print('Running validation only')
             qa.validate(sess, val_set, 'validation')
         else:
             qa.train(sess, tr_set, val_set, FLAGS.train_dir)
 
-        #qa.evaluate_answer(sess, dataset, vocab, FLAGS.evaluate, log=True)
 
 if __name__ == "__main__":
     tf.app.run()
