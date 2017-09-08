@@ -15,7 +15,7 @@ import shutil
 import logging
 
 logging.basicConfig(level=logging.INFO)
-MODEL_NAME= 'mult_per_match_35_blog'
+MODEL_NAME= 'mult_per_match_35_more_drop'
 tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Learning rate.")
 tf.app.flags.DEFINE_string("beg_prob_file", 'beg_prob.npy', "File to beg write probabilities")
 tf.app.flags.DEFINE_string("summaries_dir", 'summaries_dir', "Folder for summaries")

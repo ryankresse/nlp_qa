@@ -43,13 +43,6 @@ class QASystem(object):
         self.pretrained_embeddings = np.load(embed_path, mmap_mode='r')['glove'].astype(np.float32)
         # ==== set up placeholder tokens ========
 
-        '''
-        self.cont_placeholer = None
-        self.quest_placeholder = None
-        self.ans_placeholder = None
-        self.dropout_placeholder = None
-        '''
-
         # ==== assemble pieces ====
         with tf.variable_scope("qa", initializer=tf.contrib.layers.xavier_initializer()):
             self.add_weights()
@@ -76,26 +69,6 @@ class QASystem(object):
                 'end_mlp_bias1': tf.get_variable('end_mlp_bias1', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32),
                 'end_mlp_bias2': tf.get_variable('end_mlp_bias2', shape=[self.FLAGS.cont_length, 1], dtype=tf.float32)
                 }
-
-    '''
-    def add_placeholders(self):
-        """Generates placeholder variables to represent the input tensors
-
-          These placeholders are used as inputs by the rest of the model building and will be fed
-          data during training.  Note that when "None" is in a placeholder's shape, it's flexible
-          (so we can use different batch sizes without rebuilding the model).
-
-          Adds following nodes to the computational graph
-          self.quest_placeholder: (None, quest_length)
-          self.context_placeholder: (None, context_length)
-          self.ans_placeholder: (None, 2)
-          dropout_placeholder: (scalar)
-       """
-        self.quest_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.quest_length))
-        self.cont_placeholder = tf.placeholder(tf.int32, shape=(None, self.FLAGS.cont_length))
-        self.ans_placeholder = tf.placeholder(tf.int32, shape=(None, 2))
-        self.dropout_placeholder = tf.placeholder(tf.float32, shape=(None))
-    '''
 
     def create_datasets(self):
 
@@ -145,7 +118,8 @@ class QASystem(object):
         if not self.is_test:
             self.loss = self.get_loss(self.beg_logits, self.end_logits)
             tf.summary.scalar('loss', self.loss)
-            self.train_op, self.grad_norm = self.add_train_op(self.loss)
+            #self.train_op, self.grad_norm = self.add_train_op(self.loss)
+            self.train_op = self.add_train_op(self.loss)
 
 
         self.merged = tf.summary.merge_all()
@@ -188,11 +162,12 @@ class QASystem(object):
 
     def add_train_op(self, loss):
         optimizer = tf.train.AdamOptimizer(self.lr)
-        gradients, var = zip(*optimizer.compute_gradients(loss))
-        self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float32)
-        gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
-        train_op = optimizer.apply_gradients(zip(gradients, var))
-        return train_op, grad_norm
+        #gradients, var = zip(*optimizer.compute_gradients(loss))
+        #self.clip_val = tf.constant(self.FLAGS.max_gradient_norm, tf.float32)
+        #gradients, grad_norm = tf.clip_by_global_norm(gradients, self.clip_val)
+        #train_op = optimizer.apply_gradients(zip(gradients, var))
+        train_op = optimizer.minimize(loss)
+        return train_op
 
     def input_lstm(self, quest_embed, quest_lens, filtered_cont, cont_lens):
         with tf.variable_scope('input_lstm', initializer=tf.contrib.layers.xavier_initializer()) as scope:
@@ -214,7 +189,7 @@ class QASystem(object):
             bw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             fw_cell = tf.nn.rnn_cell.BasicLSTMCell(self.FLAGS.state_size)
             outputs, output_states = tf.nn.bidirectional_dynamic_rnn(fw_cell, bw_cell, att_vecs, sequence_length=self.cont_lens, dtype=tf.float32)
-            return tf.concat([outputs[0], outputs[1]], 2) #(batch, cont, state*2)
+            return tf.nn.dropout(tf.concat([outputs[0], outputs[1]], 2), 0.8) #(batch, cont, state*2)
 
     def beg_lstm(self, cont_scaled):
         with tf.variable_scope('beg_lstm') as scope:
@@ -421,9 +396,14 @@ class QASystem(object):
 
 
     def train_on_batch(self, sess):
-        to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
-        train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
-        return loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged
+        #to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.grad_norm, self.merged]
+        to_run = [self.train_op, self.ans, self.loss, self.beg_logits, self.end_logits, self.beg_prob, self.end_prob, self.merged]
+
+        #train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged =  sess.run(to_run)
+        #return loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged
+        train_op, ans, loss, beg_logits, end_logits, beg_prob, end_prob, merged =  sess.run(to_run)
+        return loss, beg_logits, end_logits, beg_prob, end_prob, merged
+
 
     def validate_on_batch(self, sess):
         loss, ans, cont, starts, ends  =  sess.run([self.loss, self.ans, self.cont, self.starts, self.ends])
@@ -486,9 +466,13 @@ class QASystem(object):
             print('Batch {} of {}'.format(i+1, num_batches))
             sess.run(self.tr_inititializer, feed_dict={self.quest_data_placeholder: train_examples[0], self.cont_data_placeholder:train_examples[1], self.ans_data_placeholder:train_examples[2]})
             if (i == num_batches - 1): break
-            loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged  = self.train_on_batch(sess)
+            #loss, beg_logits, end_logits, beg_prob, end_prob, grad_norm, merged  = self.train_on_batch(sess)
+            loss, beg_logits, end_logits, beg_prob, end_prob, merged  = self.train_on_batch(sess)
+
             running_loss +=loss
-            print('loss: {:.2E}, grad_norm: {}'.format(loss, grad_norm))
+            #print('loss: {:.2E}, grad_norm: {}'.format(loss, grad_norm))
+            print('loss: {:.2E}'.format(loss))
+
             if i % 200 == 0:
                 self.write_summaries(merged, epoch, i, num_batches)
 
@@ -496,8 +480,9 @@ class QASystem(object):
 
         print('Epoch {} train loss: {:.2E}'.format(epoch, avg_loss))
         print('=========================')
+        return avg_loss, beg_prob, end_prob
 
-        return avg_loss, grad_norm, beg_prob, end_prob
+        #return avg_loss, grad_norm, beg_prob, end_prob
 
 
     def retrieve_prev_best_score(self):
@@ -559,7 +544,8 @@ class QASystem(object):
             print('==========')
             tic = time.time()
 
-            tr_loss, grad_norm, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
+            #tr_loss, grad_norm, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
+            tr_loss, beg_prob, end_prob = self.run_epoch(sess, tr_set, epoch)
             print('=========================')
             toc = time.time()
             epoch_dur = (toc - tic) / 60
